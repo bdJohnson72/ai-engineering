@@ -1,56 +1,34 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-This is an AI learning repository focused on following Andrej Karpathy's "Zero to Hero" neural networks course. The project is in early stages and primarily uses Jupyter notebooks for interactive learning.
+Personal AI/ML learning repository. Organized by source (courses, projects, sandbox). Not a production codebase — optimized for learning and shareability.
 
-## Development Environment Setup
+## Development Environment
 
-**Python Version**: 3.13.5  
-**Virtual Environment**: `.venv/`
+- **Python**: 3.12+
+- **Package Manager**: uv
+- **Primary Interface**: Jupyter notebooks
 
-Always activate the virtual environment before working:
 ```bash
-source .venv/bin/activate
+uv sync                  # core deps (numpy, pandas, matplotlib, jupyter)
+uv sync --extra ml       # + scikit-learn, torch
+uv sync --extra llm      # + openai, gradio
+uv sync --extra all      # everything
+jupyter lab              # start working
 ```
 
-## Common Commands
+## Structure
 
-### Environment Management
-```bash
-# Activate virtual environment
-source .venv/bin/activate
+- `courses/` — Organized by source (karpathy, datacamp, hands-on-ml, etc.)
+- `projects/` — Original applied work (tool-calling, embeddings)
+- `kaggle/` — Competition notebooks
+- `sandbox/` — Scratch work and experiments
+- `journal.md` — Chronological learning log
 
-# Install common ML dependencies (likely needed as course progresses)
-pip install numpy matplotlib torch jupyter jupyterlab pandas
-```
+## Conventions
 
-### Jupyter Development
-```bash
-# Start Jupyter Lab for notebook development
-jupyter lab
-
-# Start Jupyter Notebook (alternative)
-jupyter notebook
-```
-
-## Code Architecture
-
-### Directory Structure
-- `karpathy/` - Course materials and notebooks following Karpathy's neural networks course
-- `.venv/` - Python virtual environment with Python 3.13.5
-- `.idea/` - IntelliJ/PyCharm IDE configuration
-
-### Development Approach
-- **Primary Development**: Jupyter notebooks in `karpathy/` directory
-- **Learning-Focused**: Code is organized by course instructor/curriculum
-- **Interactive Development**: Notebooks are used for hands-on neural network implementation
-
-## Important Notes
-
-- This is a learning repository, not a production codebase
-- No formal build/test/lint processes are currently configured
-- Dependencies will likely expand as the course progresses (expect PyTorch, NumPy, Matplotlib)
-- Course materials are organized by instructor in separate directories
+- One folder per course or project
+- Notebooks should be self-contained (explain context in markdown cells)
+- Data files live alongside their notebooks in a `data/` subfolder
+- No formal test/lint pipeline — this is a learning repo
