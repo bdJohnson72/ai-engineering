@@ -117,18 +117,22 @@ Each day has:
   - [x] **Reingest semantics:** simplified to "always upsert with content-hash IDs" — same content = same ID = idempotent overwrite. `--reingest` flag deferred (operational TODO; cheap re-embedding makes it not urgent).
   - [x] Persist to `sandbox/beer_rag_app/vector_db/` with collection name `beer_rag`. **6964 vectors** as of 2026-04-27 ingest run.
   - [x] `python sandbox/beer_rag_app/ingest.py` runs cleanly. Prints `1457 docs → 7128 chunks` and `Vector store created with 6964 documents`.
-- [ ] Write `answer.py`:
-  - `answer_question(question: str, history: list) -> str`
-  - Steps: embed question → `collection.query(n_results=8)` → stuff into system prompt → `litellm.completion(model="openai/gpt-4.1-nano")` → return string.
-  - **Design decisions still open before coding** (user-owned per working agreement):
-    1. **Refuse-vs-hedge** when context doesn't cover the question. Pure refusal is honest but unhelpful; hedging is more useful but risks hallucination drift. Pick one.
-    2. **Citation behavior** — inline (e.g., `[BBD 2024-08-16]`), end-of-answer, or none. Citations support audit + Day 2 factuality scoring but cost tokens.
-    3. **Context formatting** — concatenated raw (`"\n\n".join(chunks)`), numbered (`[1] {text}\n[2] {text}`), or source-tagged (`=== {source}::{heading} ===\n{text}`). Source-tagged preserves provenance and pairs with citation behavior.
-    4. **`top_k`** — plan suggests 8. Day 2 eval will tell whether 8 is right.
-  - System-prompt starter from plan (treat as floor, not ceiling): "You are an assistant answering questions about the beer industry and Boston Beer Company, using the provided context from a personal research wiki. If the context doesn't answer the question, say so. Context: {context}"
+- [x] Write `answer.py` (done 2026-04-28 afternoon):
+  - `answer_question(question: str, history: list[dict] = []) -> tuple[str, list[Result]]` — returns answer + chunks for citations / eval / debug visibility.
+  - Three functions: `fetch_content` (embed + Chroma top-K), `make_rag_messages` (system+history+user assembly), `answer_question` (composer).
+  - Direct OpenAI SDK (not litellm) for v0.1; `MODEL = "gpt-4.1-nano"`, `RETRIEVAL_K = 10`.
+  - Shared constants imported from `ingest.py` (`Result`, `DB_NAME`, `EMBEDDING_MODEL`, `COLLECTION_NAME`) — drift-proof.
+  - Module-level `openAI` + `vectorstore` + `collection` clients (cold-start cost paid once).
+  - **Design decisions resolved (deferred from Day 1):**
+    1. Refuse-vs-hedge: **explicit refusal** ("If you do not know the answer say so") encoded in `SYSTEM_PROMPT`.
+    2. Citation behavior: **source-tagged context formatting** prepends `f"Extract from {chunk.metadata['source']}:\n{chunk.page_content}"` to every chunk — gives the LLM filenames to cite.
+    3. Context formatting: source-tagged, joined with `\n\n`. Picked option 3 from the plan.
+    4. `top_k = 10` (slightly above plan's suggestion of 8). Day 2 eval will validate.
+  - Smoke-tested: "How can Sam Adams boost sales in 2026" returns coherent answer with relevant chunks; cosine distances 0.63–0.72 (healthy "relevant but varied" spread).
 - [ ] Write `app.py`:
-  - `gr.ChatInterface(answer_question, title="Beer Industry Intel", type="messages").launch(inbrowser=True)`
+  - `gr.ChatInterface(answer_question, title="Beer Industry Intel", type="messages").launch(inbrowser=True)` — adapter needed because `answer_question` returns `(str, list)` but Gradio expects `str`.
 - [ ] Run it. Ask ~10 BBC-relevant questions. Note which answers feel obviously wrong. Don't fix anything — write observations in a scratchpad / `OBSERVATIONS.md`.
+- [ ] Cleanup before commit: remove debug `print` on `answer.py` line 35.
 
 **Day 1 carryover → Saturday:** embeddings + Chroma persistence + `answer.py` + `app.py` all deferred. Friday was a slower-than-budgeted Python ramp-up day (not a concept problem — the AI-engineering reasoning was strong; Python-idiom friction was the cost driver). Saturday will need a small reshuffle: finish Day 1 carryover in the morning, then compress Day 2 (eval harness) into the afternoon.
 
@@ -245,12 +249,13 @@ Each day has:
 
 ## 6. After the sprint — where this hands off
 
-This sprint closes the **Week 2 roadmap milestone**. ~~Week 3 (4/28–5/4)~~ **Week 3 (Thu 4/30–Sun 5/4, 5 days)** picks up with:
+This sprint closes the **Week 2 roadmap milestone** (basic-mode RAG + eval baseline). ~~Week 3 (4/28–5/4)~~ **Week 3 (Thu 4/30–Sun 5/4, 5 days)** picks up with:
+- **Day 3 carryover (descoped from this sprint):** LLM-driven chunking, reranking, query rewriting, ablations. Lands first in Week 3 — the basic-mode service + clean baseline anchor it.
 - **FastAPI wrapper** around `answer.answer_question` exposing a `/query` POST endpoint.
 - **Dockerfile** containerizing the service + Chroma.
 - DataQuest Part 4 (FastAPI + Docker) as the conceptual track.
 
-**If Wednesday ends without the module structure working end-to-end, Week 3 slips further.** FastAPI is supposed to wrap *a working module*, not a mid-build one. Week 3 is now 2 days shorter than originally planned, so any further slip eats into Week 4 (Azure) — flag early and reshape, don't pretend.
+**If Wednesday ends without basic mode + a Day 2 baseline, Week 3 slips further.** FastAPI is supposed to wrap *a working evaluated module*, not a mid-build one. Week 3 is now 2 days shorter than originally planned **and** absorbs the Day 3 pro-techniques work — total Week 3 load is dense; flag early if it won't fit and reshape, don't pretend.
 
 **What explicitly does NOT go in this sprint (scope discipline):**
 - No FastAPI (Week 3).
@@ -296,21 +301,62 @@ Fill in as you go. Future-you will want this when the BBC Intel Platform doc nee
   - **Snapshot-vs-binding semantics (second recurrence)** — user re-hit the "value doesn't auto-update when its source changes" bug at the call site for `strip_frontmatter`. Same Apex-formula-fields intuition mismatch as Friday. Worth reinforcing study target.
 - Commit SHA: (commit pending — recommended message: `"Beer RAG Day 1 carryover: ingest pipeline through Chroma persistence (1457 docs → 6964 vectors)"`)
 
-### Tue 2026-04-28 — finishing Day 1 carryover, then Day 2 (eval baseline)
+### Tue 2026-04-28 — `answer.py` written; Day 1 still NOT closed; Day 2 not started
+- Start time: ~midday (Socratic session)
+- End time: ~mid-afternoon
+- Blocks completed: `answer.py` v0.1 — three functions (`fetch_content`, `make_rag_messages`, `answer_question`) end-to-end. Pipeline breathes against the persisted 6964-vector store. Smoke test answers a real Sam Adams query.
+- Blocks NOT completed (slipping into Wednesday): `app.py` Gradio wiring, 10 BBC test questions, `OBSERVATIONS.md` Day 1 impressions, **all of Day 2** (eval harness, tests.jsonl, dashboard, baseline metrics).
+- What worked:
+  - **Skeleton-first cadence** — empty file → imports → constants → module-level clients → function signatures → bodies one at a time. Each step verified before piling on. User wrote every line of code.
+  - **DRY-via-import** decision — refactored `ingest.py` to expose `COLLECTION_NAME` so `answer.py` could import it. User correctly named the principle ("we should import it") before being told the trade-off. This is the kind of SWE intuition that transfers cleanly from Apex.
+  - **Tuple return reasoning** — connected `(answer, chunks)` to citation + eval + debug needs the moment it was framed. Saw why throwing chunks away costs Day 2 evaluability.
+  - **Message ordering intuition** — got `[system] + history + [user]` right on first guess. Reasoning was directionally correct (model needs context first, then history, then question); deeper reason ("last user message is what the model responds to") added on top.
+  - **Identifying the litellm prefix bug** quickly once the 400 came back — connected the `"openai/gpt-4.1-nano"` litellm-format string to the OpenAI SDK rejecting it.
+- What got stuck:
+  - **Python imports** — confirmed as a real gap (saved to memory `user_python_imports_gap.md`). User did not realize a sibling `.py` file in the same directory is importable without packaging. Apex-orgs auto-resolve names; Python doesn't. Worth dedicated reading: official Python docs on the import system, modules vs packages, `sys.path`. **High-leverage gap to close** — every cross-file reference in Python depends on it.
+  - **IDE autocomplete bogus imports — twice in one session** (`from jedi.inference...` and `from sandbox.RAG_Beer_Intel import collection`). PyCharm's "auto-import on type" injects paths that don't actually resolve. Habit to build: glance at imports after typing dunders / cross-module names.
+  - **Chroma response shape** — list-of-lists tripped the user multiple times. Tried `results[0]` on a dict (KeyError); double-indexed `results["documents"]` partially; misread bullets inside one chunk as multiple chunks. Concept that needs to land: **`results` is a dict of parallel arrays, where each array's outer `[0]` peels the per-query wrapper.**
+  - **`__main__` quoting** — wrote `if __name__ == __main__:` (unquoted). Caused NameError. Apex doesn't need quotes around class name comparisons; Python does for string literals.
+  - **Display-truncation misdiagnosis** — `print(s[:300])` was reported as "the system prompt isn't loading completely." Slice is display-only; the underlying string was fine. Worth internalizing that `[:n]` never throws and is always a view, not a transform.
+  - **Result-vs-Chunk class confusion (fourth recurrence)** — happened again briefly when discussing what gets returned where. Naming is genuinely ambiguous; consider rename to `RetrievableChunk` once you can make it without breaking smoke tests.
+- Concepts driven home today:
+  - **RAG embedding-model rule** — same model for ingest and query, else cosine distance is meaningless. Bedrock fact.
+  - **Chroma response structure** — `documents`, `metadatas`, `ids`, `distances` are parallel arrays aligned by index. `zip()` is the natural traversal.
+  - **Citation anchors via context formatting** — prefixing each chunk with `"Extract from {source}:"` is what *enables* the LLM to cite. Without filenames in the prompt, no citations possible. Also acts as a chunk fence.
+  - **Module-level state** — clients (OpenAI, Chroma) opened once at import time, reused across calls. Avoids cold-start cost. Apex parallel: think of these as static-initialized singletons.
+- Areas for more study (homework outside session time):
+  - Python import system end-to-end: modules, packages, `__init__.py`, `sys.path`, relative vs absolute imports, `if __name__ == "__main__"`. Recommend the *official Python tutorial section 6 (Modules)* — short, authoritative.
+  - Python string slicing semantics — `s[:n]`, `s[n:]`, `s[a:b]`, `s[-n:]`, never throws, copy vs view rules.
+  - Dict access patterns vs list access patterns — `d[0]` vs `lst[0]` failure modes.
+- Commit SHA: (pending — recommended message: `"Beer RAG Day 1 carryover: answer.py v0.1 (fetch_content, make_rag_messages, answer_question)"`)
+
+**Schedule risk — honest pushback:**
+
+Per the plan, Tuesday should have closed Day 1 carryover *and* opened Day 2 baseline. Reality: only `answer.py` got finished. Wednesday now has to absorb:
+- Day 1.5: `app.py` + 10 BBC questions + `OBSERVATIONS.md`
+- Day 2 entire: `evaluation/` package, `tests.jsonl` curation (20–30 queries), `eval.py` (MRR + nDCG + keyword coverage + LLM judge), `dashboard.py`, run baselines
+- Day 3 entire (per current plan): pro pipeline (LLM chunking + reranker + query rewriter), ablations, `OBSERVATIONS.md` write-up
+
+That is **3+ days of work in one ~2–3 hr session**. Not realistic. Three honest options:
+
+1. **Drop Day 3 (pro mode) entirely from this sprint.** Land Day 1+Day 2 cleanly Wednesday. Pro techniques become Week 3 add-ons after FastAPI is up. Cleanest, costs the L3 evidence on rerank/rewrite/LLM-chunking.
+2. **Slip Day 3 into Thursday** (Week 3 starts Friday instead of Thursday). Costs another day from FastAPI+Docker (Week 3 was already 7 → 5; would become 4 days, tight but maybe workable if Azure week absorbs).
+3. **Compress Day 2 to a minimal eval** (~10 tests, retrieval-only — no LLM judge) so Day 3 still fits Wednesday. Loses answer-quality numbers; retains retrieval signal. Accepts that the eval harness is a stub.
+
+**Recommendation: option 1.** Day 3's pro techniques are a measured-improvement exercise; without a reliable Day 2 baseline (which option 3 weakens), the comparison is meaningless. Better to have a clean basic-mode v1 + honest baseline than a half-broken pro-mode comparison. Pro techniques can land in Week 3 between FastAPI and Docker, where they have a working service to attach to.
+
+Push back on this if you read it differently — e.g., if the L3 evidence on pro techniques is a higher priority than I'm weighting it.
+
+### Wed 2026-04-29 — Day 2 (eval harness + baseline). Day 3 (pro mode) descoped to Week 3.
 - Start time:
 - End time:
-- Day 1 close-out: `answer.py` + `app.py` + 10 BBC questions + observations.
+- **Scope this session** (~2–3 hrs): close Day 1 carryover (`app.py` + 10 BBC questions + `OBSERVATIONS.md` Day 1 impressions + `answer.py` line-35 cleanup) → start Day 2 eval harness. If full Day 2 doesn't fit (likely), at minimum land `tests.jsonl` + retrieval eval (`MRR`, `nDCG`, `keyword coverage`); LLM-judge answer eval can slip to Thursday before Week 3 starts.
 - Day 2 baseline: MRR=___ nDCG=___ coverage=___% · acc=___/5 comp=___/5 rel=___/5
 - Worst category + hypothesis:
 - Commit SHA:
 
-### Wed 2026-04-29 — new Day 3 (pro mode + ablations)
-- Start time:
-- End time:
-- Pro metrics: MRR=___ nDCG=___ coverage=___% · acc=___/5 comp=___/5 rel=___/5
-- Biggest delta vs. baseline:
-- Ablation findings:
-- Commit SHA:
+### Day 3 — pro mode + ablations — **DESCOPED to Week 3 carryover**
+Originally scheduled for Wed 2026-04-29; now lands in Week 3 between FastAPI and Docker if Week 2 closes clean. Rationale: Day 3 is a measured-improvement exercise that needs a working basic pipeline + clean baseline as its anchor. Forcing it into one ~2.5hr Wednesday session would compromise both the baseline and the pro-mode comparison. Better to land basic + honest numbers cleanly, then layer pro techniques onto a deployed FastAPI service in Week 3 where they have a service to attach to. Tasks (LLM-driven chunking, reranking, query rewriting, ablations) preserved verbatim in section 5 above for the Week 3 pickup.
 
 ---
 

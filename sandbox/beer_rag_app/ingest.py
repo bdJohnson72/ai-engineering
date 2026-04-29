@@ -66,6 +66,7 @@ DB_NAME = str(Path(__file__).parent / "vector_db")
 MAX_CHUNK_CHARS = 1500
 OVERLAP_CHARS = 150
 BATCH_SIZE = 50
+COLLECTION_NAME = 'beer_rag'
 
 load_dotenv(override=True)
 all_files = ""
@@ -267,7 +268,7 @@ def crete_embeddings(chunks: list[Result]):
         embeddings = openai.embeddings.create(model=EMBEDDING_MODEL, input=batch).data
         vectors.extend([e.embedding for e in embeddings])
 
-    collection = chroma.get_or_create_collection('beer_rag')
+    collection = chroma.get_or_create_collection(COLLECTION_NAME)
     UPSERT_BATCH = 5000  # under Chroma's per-call cap (~5461)
     for i in tqdm(range(0, len(ids), UPSERT_BATCH), desc="upserting"):
         collection.upsert(
