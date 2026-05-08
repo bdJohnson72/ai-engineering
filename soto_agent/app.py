@@ -31,7 +31,10 @@ _PROMPTS_DIR = Path(__file__).parent / "prompts"
 SYSTEM_PROMPT = (_PROMPTS_DIR / "system_prompt.md").read_text()
 
 # Hard cap to prevent runaway tool-call loops.
-MAX_TURNS = 12
+# 20 accommodates models that don't parallelize tool calls (e.g., DeepSeek V3
+# returns one tool_call per turn). gpt-4.1 / gpt-4.1-mini typically converge
+# in 3-5 turns via parallel calls.
+MAX_TURNS = 20
 
 
 def _build_gpt41mini() -> tuple[Any, str, dict]:
