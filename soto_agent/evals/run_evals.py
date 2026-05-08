@@ -2,22 +2,23 @@
 
 Usage:
     uv run python -m soto_agent.evals.run_evals
+    uv run python -m soto_agent.evals.run_evals --model deepseek-r1
 
-Writes a timestamped Markdown report to soto_agent/evals/runs/. Each test case
-gets a section with the question, expected behavior, latency, the agent's
-answer, and a checkbox for manual pass/fail review.
+Writes a timestamped Markdown report to soto_agent/evals/runs/. Filename
+includes the model name so multi-model comparisons stay sortable.
 
-Manual review is intentional for v1 — a small N benefits more from human eyes
-than from an LLM judge. Once the eval set crosses ~20 cases, consider adding
-LLM-as-judge for grading the must_use_terms / must_not_do constraints.
+Manual review is intentional for v1 — a small N benefits more from human
+eyes than from an LLM judge. Once the eval set crosses ~20 cases, consider
+adding LLM-as-judge for grading must_use_terms / must_not_do constraints.
 """
 
+import argparse
 import json
 import time
 from datetime import datetime
 from pathlib import Path
 
-from soto_agent.app import run_agent
+from soto_agent.app import DEFAULT_MODEL, run_agent
 
 EVALS_DIR = Path(__file__).parent
 TEST_CASES_PATH = EVALS_DIR / "test_cases.jsonl"
@@ -30,16 +31,26 @@ def load_cases() -> list[dict]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=f"Model name; default {DEFAULT_MODEL} from SOTO_MODEL env.",
+    )
+    args = parser.parse_args()
+    model_name = args.model or DEFAULT_MODEL
+
     cases = load_cases()
-    print(f"Loaded {len(cases)} test cases.\n")
+    print(f"Loaded {len(cases)} test cases. Model: {model_name}\n")
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     RUNS_DIR.mkdir(exist_ok=True)
-    out_path = RUNS_DIR / f"{timestamp}.md"
+    out_path = RUNS_DIR / f"{timestamp}-{model_name}.md"
 
     with open(out_path, "w") as out:
         out.write(f"# Eval run — {timestamp}\n\n")
-        out.write(f"Total cases: {len(cases)}\n\n---\n\n")
+        out.write(f"- **Model:** `{model_name}`\n")
+        out.write(f"- **Total cases:** {len(cases)}\n\n---\n\n")
 
         for i, case in enumerate(cases, 1):
             print(f"[{i}/{len(cases)}] {case['id']} ({case['category']})")
@@ -47,7 +58,7 @@ def main() -> None:
 
             t0 = time.perf_counter()
             try:
-                answer = run_agent(case["question"])
+                answer = run_agent(case["question"], model=model_name)
                 error = None
             except Exception as e:
                 answer = ""
