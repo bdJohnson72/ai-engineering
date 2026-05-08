@@ -98,6 +98,50 @@ git log --oneline -10  # see 9 soto_agent commits since 5/8
 
 Then: write `tools/glossary_lookup.py` (user-driven), wire it into `app.py` TOOLS + _DISPATCH (user-driven, locks tool-registration learning), add `Dockerfile` + FastAPI route, `az containerapp up`.
 
+## Streaming UX — Path A specification (locked 2026-05-08)
+
+Reuses existing `Account_Intelligence__e` Platform Event from PR 15651 — **no new SF metadata**. Adds a new `Status__c` value for in-flight progress events; LWC subscriber (already running in `connectedCallback`) gains a branch for it.
+
+**PE schema (existing fields, new Status value):**
+
+| Field | Existing values | New for Path A |
+|---|---|---|
+| `CorrelationId__c` | UUID per request | unchanged |
+| `Status__c` | `SUCCESS`, `ERROR` | **add `PROGRESS`** |
+| `Result__c` | JSON answer (on SUCCESS) | JSON `{stage, query?, page?}` (on PROGRESS) |
+| `Message__c` | error text | unchanged |
+
+**Stages emitted by agent (one PE per stage):**
+
+| Trigger | Result__c JSON | LWC text |
+|---|---|---|
+| `run_agent` start | `{"stage":"started"}` | "On it — looking up your question..." |
+| Each `wiki_search` call | `{"stage":"searching","query":"..."}` | "Searching wiki for *<query>*" |
+| Each `wiki_read` call | `{"stage":"reading","page":"..."}` | "Reading *<page>*..." |
+| Final synthesis turn (no tool_calls) | `{"stage":"drafting"}` | "Drafting answer..." |
+| Final answer | `Status__c=SUCCESS` (existing path) | renders the answer |
+
+**LWC behavior changes:**
+- empApi callback already filters by `correlationId` (durable from PR 15651). Add a branch: if `Status__c === 'PROGRESS'`, parse `Result__c` and update the spinner status line; otherwise existing SUCCESS/ERROR rendering paths.
+- Spinner display: single rotating line for v1 (replaces previous text). Stacked log can come post-demo if reps want a visible reasoning trail.
+- Fallback: if no PROGRESS event arrives within 5s of spinner start, rotate generic personality lines ("Pondering...", "Cross-referencing...") so the spinner never looks frozen.
+
+**Backend (agent-side) implementation:**
+- Add `soto_agent/sf_publish.py` — `publish_status(correlation_id, stage, **kwargs)` helper. Reuses the OAuth client_credentials pattern from existing middleware.
+- Call from `run_agent` between turns AND from inside tool dispatch (before each `wiki_search`/`wiki_read` actually fires).
+- Status PE failures must NOT abort the agent loop (best-effort fire-and-forget; log but continue).
+
+**Cost / governor checks:**
+- Org default: 250k high-volume PE / 24h. Demo scale (~10 questions × ~6 stages) = trivial.
+- Each PE publish ≈ 50-100ms on agent side. ~5 stages per question = +250-500ms total latency. Worth it for perceived-latency win.
+- Order: PEs fire in publish order; SF empApi delivers in order. No sequence-number field needed for v1.
+
+**Implementation timing:** Build during step 7 (Tue 5/12 SF integration). LWC changes pair with that work — coordinate with Salesforce engineer to add the PROGRESS branch to existing `accountIntelligence` LWC.
+
+**Future tiers (deferred):**
+- Path B (chunked answer per sentence) — only if A insufficient. Would emit additional PEs with answer fragments.
+- Path C (SSE direct LWC ↔ Container App) — post-demo. New CSP Trusted Site + auth model.
+
 ## Architecture decisions (locked this session 2026-05-09)
 
 | Decision | Choice | Reason |
