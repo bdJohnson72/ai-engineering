@@ -27,6 +27,7 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | Genie role | **Tool, not primary path** | Demoted 5/8. May call when NL is fuzzy; agent writes direct SQL via Databricks MCP otherwise. A/B eval post-demo. |
 | SF round-trip | **Reuse existing Function App + PE channel** | PR 15651 shipped the durable contract — don't rebuild |
 | Vocabulary | **3-layer**: system-prompt primer + `glossary_lookup` tool + `wiki_query` tool | Cuts tool calls for common terms; precise lookup when needed |
+| Streaming UX | **Path A first**: status-step PE → chunked PE (B) → SSE direct (C) | Stay in PR 15651 contract for v1 demo. Agent publishes 2-3 status PEs per query ("searching", "drafting", "done"). Path B/C only if A insufficient. |
 
 ## Tools planned (v1, demo-confirmed)
 
@@ -115,7 +116,8 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 | Vocabulary primer compression: hand-curate OR LLM-generate from glossary? | Before system prompt v1 |
 | Genie space tuning vs raw MCP for direct SQL — which wins on what query types? | Eval Mon 5/12 + post-demo |
 | AI Search semantic ranker as 4th tool? | Wed 5/14 (after wiki vs AI Search eval) |
-| Streaming SSE LWC → Container App direct? | Stretch for 5/29 if v1 lands clean Sat 5/10 |
+| Path B (chunked PE per sentence) needed, or does Path A suffice? | After 5/20 dry-run feedback |
+| Path C (SSE direct LWC ↔ Container App)? | Post-demo. New CSP Trusted Site + auth model. |
 
 ## Build order locked
 
@@ -149,7 +151,7 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 
 - LangChain / LangGraph / Crew / AutoGen frameworks — DEFERRED to post-5/29 per 2026-05-08 plan pivot
 - Foundry Agent Service hosting — DEFERRED; A/B comparison post-demo
-- Streaming SSE to LWC — STRETCH only if 5/10 v1 lands clean
+- SSE-direct streaming (Path C) — DEFERRED post-demo. Status-step PE (Path A) in scope for 5/29; chunked PE (Path B) only if A insufficient.
 - Vector RAG (`vector_retrieve` via AI Search) — Option B only; decision 5/14
 - New Salesforce metadata — reuse PR 15651 artifacts; new endpoint = new Named Credential URL only
 - ECA migration (Connected App → External Client App) — production hardening, post-demo
