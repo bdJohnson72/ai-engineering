@@ -1,4 +1,4 @@
-/# SOTO Agent — Project Context
+# SOTO Agent — Project Context
 
 > Drop-in context recovery doc. Read this first when restarting a session in `/Users/brooksjohnson/ai-engineering/soto_agent/`.
 
@@ -15,6 +15,88 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | **2026-05-20** | Dry run — CTO present. Explainable hallucinations OK. |
 | **2026-05-29** | Live demo — possibly COO present. Must be solid. |
 | **5/20–5/29** | "Plug-the-embarrassment" window. |
+
+## Where we left off (end of 2026-05-08)
+
+**Steps 1-3 done. Three models benchmarked. ACR provisioned. Ready for Mon 5/11 deploy work.**
+
+What runs end-to-end today:
+
+```bash
+cd ~/ai-engineering
+uv run python -m soto_agent.app --model gpt-4.1 "What is BBC's on-premise strategy for Sun Cruiser?"
+uv run python -m soto_agent.evals.run_evals --model gpt-4.1
+```
+
+Models registered (in `soto_agent/app.py` `_MODEL_BUILDERS`):
+- `gpt-4.1-mini` — default; env `AZURE_OPENAI_DEPLOYMENT_CHAT`
+- `gpt-4.1` — env `AZ_GPT_FOUR_ONE`
+- `gpt-5` / `gpt-5-mini` — slots only, not deployed yet
+- `deepseek-v3` — env `AZ_DEEPSEEK_THREE_ONE`; same Foundry v1 surface as R1
+- `deepseek-r1` — registered but **NOT usable for agent** (Azure rejects tool calls with `UnsupportedToolUse 400`); reserved for future LLM-as-judge
+
+Multi-model eval results (4-case suite, all in `soto_agent/evals/runs/`):
+
+| Model | Total latency | Multi-hop | Cost vs cheapest |
+|---|---:|---|---:|
+| `gpt-4.1` | 94s | ✓ best | 13× |
+| `deepseek-v3` | 170s | ✓ ok (after MAX_TURNS bump + parallel-call prompt rule) | 1× |
+| `gpt-4.1-mini` | 220s | soft fail (single-source comparison) | 1× |
+
+For demo: lean **`gpt-4.1`**. Multi-hop reliability + speed > marginal cost savings.
+
+Prompt fixes that have been driven by eval failures (regression tests in `evals/test_cases.jsonl`):
+- Disambiguation rule (How-to-answer #2) — fired by `disamb-objective-priority-sku-001`
+- Comparison-Q must read both sides (How-to-answer #6) — fired by `multihop-compare-truly-suncruiser-001`
+- Tool-call efficiency (parallel batching, follow wikilinks before re-searching) — fired by V3 trace debug
+
+### Re-ordered build plan (decision 2026-05-08)
+
+User wants SF connected sooner. Originally tools first → FastAPI → deploy → SF. Re-ordered to **FastAPI → deploy → SF (with wiki only) → keep adding tools**. Integration spine de-risked early; tool wiring after deploys is incremental.
+
+| When | What |
+|---|---|
+| **Sat-Sun 5/9-5/10** | Optional reading — Chip Huyen Ch 6 RAG/Agents (per learning posture) |
+| **Mon 5/11 AM** | `glossary_lookup` (~30 min, user-driven write per recovery option C) + Step 5 FastAPI route |
+| **Mon 5/11 PM** | Step 6 — first Container App deploy via `az acr build` + `az containerapp up` against `bbcsotoacr.azurecr.io` |
+| **Tue 5/12** | Step 7 — SF integration. Named Credential URL swap to deployed Container App. Smoke test E2E from LWC. Live agent reachable from SF (wiki-only). |
+| **Wed 5/13** | Start `databricks_query` tool wiring; smoke against warehouse |
+| **Thu 5/14** | Finish `databricks_query` + start `salesforce_query` |
+| **Fri 5/15** | Finish `salesforce_query`; integration testing on deployed agent |
+| **Weekend 5/16-17** | Buffer / refinements (user available) |
+| **Mon 5/18** | Final polish, performance check |
+| **Tue 5/19** | Pre-demo dry run |
+| **Wed 5/20** | CTO dry run |
+
+## Azure resources provisioned
+
+- **Foundry resource:** `Foundry-ITBS-POC-2` (eastus). Hosts gpt-4.1-mini, gpt-4.1, deepseek-r1, deepseek-v3.1.
+- **Function App:** `sffuncpoc` (existing middleware, do-not-touch).
+- **Container Registry (NEW 2026-05-08):** `bbcsotoacr` in `BBC-ITBS-POC-EastUS`. Login server `bbcsotoacr.azurecr.io`. SKU Basic (~$5/mo). Admin user disabled. User has Owner via creation. AcrPull for Container App's managed identity to be assigned at first deploy.
+- **Container App:** to be provisioned Mon 5/11 (`az containerapp up`).
+
+User has **Contributor** on `BBC-ITBS-POC-EastUS`, verified 2026-05-08.
+
+## Mon 5/11 — first 30 min of work
+
+```bash
+# 1. Confirm az tooling is current
+az extension add --name containerapp --upgrade
+az provider register --namespace Microsoft.App
+az provider register --namespace Microsoft.OperationalInsights
+
+# 2. Confirm subscription
+az account show -o table  # should be cebd9dd6-bc18-4e1c-9564-bd4ec13c565b
+
+# 3. Confirm ACR is reachable
+az acr show -n bbcsotoacr -o table
+
+# 4. Resume code work in this directory
+cd ~/ai-engineering
+git log --oneline -10  # see 9 soto_agent commits since 5/8
+```
+
+Then: write `tools/glossary_lookup.py` (user-driven), wire it into `app.py` TOOLS + _DISPATCH (user-driven, locks tool-registration learning), add `Dockerfile` + FastAPI route, `az containerapp up`.
 
 ## Architecture decisions (locked this session 2026-05-09)
 
@@ -39,11 +121,11 @@ current model:
 3. **First-token latency** — minor. ~tens of ms diff for 1K vs 5K tokens. Not binding at this scale.
 4. **Attention dilution** — biggest real risk. Frontier models start to ignore buried instructions when system prompt approaches ~5K tokens. **Working budget: keep total system prompt ≤2K, hard ceiling 5K total (system prompt + tool schemas).**
 
-Current breakdown (v0.1):
-- Vocabulary primer: ~1.2K tokens
-- Agent identity + tool-usage rules (TBD step 3): est. ~600 tokens
-- Tool schemas (4 tools registered): est. ~500 tokens
-- **Total est. ≈ 2.3K tokens.** Under hard ceiling. Revisit if eval shows tool-selection drift or instruction-skip.
+Current breakdown (v0.1, measured 2026-05-08):
+- Identity + How-to-answer + Tool rules + Vocabulary primer + Disambiguation block (single `system_prompt.md` file): ~1.5K tokens (was ~1.2K before disambiguation/comparison/efficiency rules added)
+- Tool schemas in code (currently 2 tools — `wiki_search`, `wiki_read`): ~250 tokens
+- **Total ≈ 1.75K tokens.** Will grow when `glossary_lookup` (~150), `databricks_query` (~250), `salesforce_query` (~250) added → projected ~2.4K. Still under 5K hard ceiling.
+- Revisit if eval shows tool-selection drift or instruction-skip.
 
 Industry reference points: Cursor ~3K, ChatGPT ~2K, Claude.ai ~5K. We're in normal range.
 
@@ -141,15 +223,17 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 | Path B (chunked PE per sentence) needed, or does Path A suffice? | After 5/20 dry-run feedback |
 | Path C (SSE direct LWC ↔ Container App)? | Post-demo. New CSP Trusted Site + auth model. |
 
-## Build order locked
+## Build order (REVISED 2026-05-08 — spine before tools)
 
-1. **Wiki primitives** — `wiki_search` + `wiki_read` in `tools/wiki.py`, plain Python, notebook-testable, NO FastAPI yet ✅ done 2026-05-08
-2. **Vocabulary primer** — compress `ubiquitous-language.md` to ~600-token system-prompt block
-3. **Agent loop skeleton** — `soto_agent/app.py` with system prompt, tool registration, run loop. **Wiki graph traversal lives here** (per C2 pivot).
-4. **Glue tools to loop** — `wiki_search`/`wiki_read`, `glossary_lookup` first; `databricks_query`, `salesforce_query` next
-5. **FastAPI route** — wrap loop as `POST /soto-agent` (or similar)
-6. **Azure deploy** — Container App
-7. **SF integration** — new Named Credential URL pointing at agent route; Apex/LWC reuse existing PR 15651 contract
+1. ✅ **Wiki primitives** — `wiki_search` + `wiki_read` in `tools/wiki.py`. Done 2026-05-08.
+2. ✅ **Vocabulary primer** — `prompts/system_prompt.md`, ~1.2K tokens hand-curated. Done 2026-05-08.
+3. ✅ **Agent loop skeleton** — `soto_agent/app.py` with `run_agent`, `_MODEL_BUILDERS` registry, tool dispatch, while-loop until no tool_calls. Done 2026-05-08. **Note:** Claude wrote the loop in this session; user flagged this as overreach. Recovery via option C: user writes the next tool's function + TOOLS schema entry + _DISPATCH mapping (steps 4a/4b/4c).
+4. ⬜ **Glue tools to loop** — `glossary_lookup` first (Mon AM), then `databricks_query` (Wed-Thu), then `salesforce_query` (Thu-Fri).
+5. ⬜ **FastAPI route** — wrap `run_agent` as `POST /soto-agent` returning JSON `{answer: str}`. Mon 5/11 AM.
+6. ⬜ **Azure deploy** — `az acr build` against `bbcsotoacr` + `az containerapp up`. Mon 5/11 PM.
+7. ⬜ **SF integration** — Named Credential URL swap to deployed Container App. Tue 5/12.
+
+**Re-order rationale:** Step 4 (rest of tools) shifted AFTER 5-6-7 so SF integration spine is live by Tue 5/12. Adding tools later = no SF-side changes. See "Where we left off" section above for the full revised week timeline.
 
 ## Repo layout (target)
 
