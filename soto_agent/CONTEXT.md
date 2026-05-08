@@ -23,11 +23,29 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | Web framework | **FastAPI** (not Flask) | Async, Pydantic, native SSE for streaming stretch |
 | Agent host | **Azure Container App** (not Function App) | No 230s ceiling; agent-loop friendly; future SSE |
 | Agent loop | **Self-hosted Python** (not Foundry Agent Service) | Learning value; Ed Donner pattern; full control |
-| LLM | **Foundry `gpt-4.1-mini`** | BBC-tenant; compliance-cleared |
+| LLM (v1 prototype) | **Foundry `gpt-4.1-mini`** | BBC-tenant; compliance-cleared. Prototype only — plan to eval `gpt-5` family, `deepseek`, `claude-sonnet-4.x` post-demo behind a model-name env var. Keep prompts model-agnostic where possible. |
 | Genie role | **Tool, not primary path** | Demoted 5/8. May call when NL is fuzzy; agent writes direct SQL via Databricks MCP otherwise. A/B eval post-demo. |
 | SF round-trip | **Reuse existing Function App + PE channel** | PR 15651 shipped the durable contract — don't rebuild |
 | Vocabulary | **3-layer**: system-prompt primer + `glossary_lookup` tool + `wiki_search`/`wiki_read` tools | Cuts tool calls for common terms; precise lookup when needed |
 | Streaming UX | **Path A first**: status-step PE → chunked PE (B) → SSE direct (C) | Stay in PR 15651 contract for v1 demo. Agent publishes 2-3 status PEs per query ("searching", "drafting", "done"). Path B/C only if A insufficient. |
+
+### System prompt / token budget reasoning
+
+Four real constraints on system-prompt size — track only the binding one for the
+current model:
+
+1. **Cost** — input tokens per turn × turns. `gpt-4.1-mini` ≈ $0.0001/1K input. 1.2K-token primer × thousands of demo turns = pennies. Not binding at v1.
+2. **Context window** — `gpt-4.1-mini` = 128K. System prompt + tool schemas + conversation + tool results all share. 1-2K of system prompt = trivial. Not binding.
+3. **First-token latency** — minor. ~tens of ms diff for 1K vs 5K tokens. Not binding at this scale.
+4. **Attention dilution** — biggest real risk. Frontier models start to ignore buried instructions when system prompt approaches ~5K tokens. **Working budget: keep total system prompt ≤2K, hard ceiling 5K total (system prompt + tool schemas).**
+
+Current breakdown (v0.1):
+- Vocabulary primer: ~1.2K tokens
+- Agent identity + tool-usage rules (TBD step 3): est. ~600 tokens
+- Tool schemas (4 tools registered): est. ~500 tokens
+- **Total est. ≈ 2.3K tokens.** Under hard ceiling. Revisit if eval shows tool-selection drift or instruction-skip.
+
+Industry reference points: Cursor ~3K, ChatGPT ~2K, Claude.ai ~5K. We're in normal range.
 
 ## Tools planned (v1, demo-confirmed)
 
@@ -116,7 +134,8 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 |---|----------------|
 | Single PE channel w/ `Source__c` discriminator OR new PE per tool? | When 2nd tool ships SF-side |
 | `glossary_lookup` reads file on disk OR loaded into memory at boot? | When building tool |
-| Vocabulary primer compression: hand-curate OR LLM-generate from glossary? | Before system prompt v1 |
+| Vocabulary primer compression: hand-curate OR LLM-generate from glossary? | Resolved 2026-05-08: hand-curated v0.1 at ~1.2K tokens (no compression — under attention-dilution ceiling). Revisit only if eval shows tool-selection drift. |
+| Cross-model eval: `gpt-5` family, `deepseek`, `claude-sonnet-4.x` vs `gpt-4.1-mini` | Post-demo. Add model name as env var so swap is config-only. Keep prompts model-agnostic. |
 | Genie space tuning vs raw MCP for direct SQL — which wins on what query types? | Eval Mon 5/12 + post-demo |
 | AI Search semantic ranker as 4th tool? | Wed 5/14 (after wiki vs AI Search eval) |
 | Path B (chunked PE per sentence) needed, or does Path A suffice? | After 5/20 dry-run feedback |
