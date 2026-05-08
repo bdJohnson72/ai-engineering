@@ -26,19 +26,22 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | LLM | **Foundry `gpt-4.1-mini`** | BBC-tenant; compliance-cleared |
 | Genie role | **Tool, not primary path** | Demoted 5/8. May call when NL is fuzzy; agent writes direct SQL via Databricks MCP otherwise. A/B eval post-demo. |
 | SF round-trip | **Reuse existing Function App + PE channel** | PR 15651 shipped the durable contract — don't rebuild |
-| Vocabulary | **3-layer**: system-prompt primer + `glossary_lookup` tool + `wiki_query` tool | Cuts tool calls for common terms; precise lookup when needed |
+| Vocabulary | **3-layer**: system-prompt primer + `glossary_lookup` tool + `wiki_search`/`wiki_read` tools | Cuts tool calls for common terms; precise lookup when needed |
 | Streaming UX | **Path A first**: status-step PE → chunked PE (B) → SSE direct (C) | Stay in PR 15651 contract for v1 demo. Agent publishes 2-3 status PEs per query ("searching", "drafting", "done"). Path B/C only if A insufficient. |
 
 ## Tools planned (v1, demo-confirmed)
 
 | Tool | Source | Purpose |
 |------|--------|---------|
-| `wiki_query` | Obsidian vault `Notes/` | BBC knowledge synthesis (multi-page reasoning, free-form questions) |
+| `wiki_search` | Obsidian vault `Notes/index.md` | LLM-picks up to 8 relevant page paths from index for a question (smart filter, hidden LLM call) |
+| `wiki_read` | Obsidian vault `Notes/` | Read a wiki page by name/path; returns body + extracted `[[wikilinks]]`. Outer agent traverses graph via repeated calls. |
 | `glossary_lookup` | `/Users/brooksjohnson/BCC_NGST_CG/docs/reference/ubiquitous-language.md` | Precise term definitions, ambiguity resolution |
 | `databricks_query` | Brooks-built Databricks MCP (2026-03-11) | SQL queries against BBC data warehouse |
 | `salesforce_query` | Apex callout via NGEN-5882 middleware path | Account context (open opps, recent visits, custom fields) |
 
-**Possible 4th (decision Wed 5/14):** `vector_retrieve` via AI Search w/ semantic ranker. Eval head-to-head vs `wiki_query` on Mon 5/12 first.
+**Pivot 2026-05-08:** wiki access split from a single `wiki_query` smart tool (Level 2, internal synthesis) → two retrieval primitives `wiki_search` + `wiki_read` (C2 pattern). Outer agent now drives graph traversal through repeated tool calls. Stage 4 synthesis subsumed by outer agent's main response.
+
+**Possible 4th (decision Wed 5/14):** `vector_retrieve` via AI Search w/ semantic ranker. Eval head-to-head vs `wiki_search` on Mon 5/12 first.
 
 ## Critical paths — ALWAYS read these before architecture decisions
 
@@ -78,7 +81,7 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 
 ### Wiki tool source
 
-- `/Users/brooksjohnson/Documents/Obsidian Vault/.claude/commands/wiki-query.md` — the existing `/wiki-query` skill that `soto_agent`'s `wiki_query` tool wraps as Python
+- `/Users/brooksjohnson/Documents/Obsidian Vault/.claude/commands/wiki-query.md` — the existing `/wiki-query` skill; `soto_agent` ports its primitives (index scan, page reads, link follow) to Python and lets the outer agent drive the loop instead of running it inside one tool
 - `/Users/brooksjohnson/Documents/Obsidian Vault/Notes/index.md` — vault index (one-line summary per page); first read on every wiki query
 - `/Users/brooksjohnson/Documents/Obsidian Vault/Notes/` — wiki root (concept pages, sources, analyses, connections)
 
@@ -121,10 +124,10 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 
 ## Build order locked
 
-1. **`wiki_query` brain** — plain Python function, notebook-testable, NO FastAPI yet
+1. **Wiki primitives** — `wiki_search` + `wiki_read` in `tools/wiki.py`, plain Python, notebook-testable, NO FastAPI yet ✅ done 2026-05-08
 2. **Vocabulary primer** — compress `ubiquitous-language.md` to ~600-token system-prompt block
-3. **Agent loop skeleton** — `soto_agent/app.py` with system prompt, tool registration, run loop
-4. **Glue tools to loop** — `wiki_query`, `glossary_lookup` first; `databricks_query`, `salesforce_query` next
+3. **Agent loop skeleton** — `soto_agent/app.py` with system prompt, tool registration, run loop. **Wiki graph traversal lives here** (per C2 pivot).
+4. **Glue tools to loop** — `wiki_search`/`wiki_read`, `glossary_lookup` first; `databricks_query`, `salesforce_query` next
 5. **FastAPI route** — wrap loop as `POST /soto-agent` (or similar)
 6. **Azure deploy** — Container App
 7. **SF integration** — new Named Credential URL pointing at agent route; Apex/LWC reuse existing PR 15651 contract
@@ -137,7 +140,7 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 ├── app.py                    # FastAPI + agent loop entry
 ├── tools/
 │   ├── __init__.py
-│   ├── wiki_query.py         # core wiki tool (build first)
+│   ├── wiki.py               # wiki_search + wiki_read primitives (build first)
 │   ├── glossary_lookup.py
 │   ├── databricks_query.py
 │   └── salesforce_query.py
