@@ -50,12 +50,12 @@ prep: refresh-glossary vault
 	@echo "Build prep complete. Ready for 'make image'."
 
 image: prep
-	az acr build \
+	cd $(REPO_ROOT) && az acr build \
 		--subscription $(AZ_SUB) \
 		--registry $(ACR_NAME) \
 		--image soto-agent:$(IMAGE_TAG) \
-		--file Dockerfile \
-		$(REPO_ROOT)
+		--file soto_agent/Dockerfile \
+		.
 
 deploy: image
 	az containerapp update \

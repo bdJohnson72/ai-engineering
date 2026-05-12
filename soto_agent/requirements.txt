@@ -1,0 +1,10 @@
+# Runtime deps for the SOTO Agent container image (slim).
+# Intentionally narrow — the parent monorepo's pyproject.toml carries fat ML
+# libs (torch, transformers, langchain) used for learning notebooks; none of
+# those are needed to run the agent itself.
+
+openai>=2.30.0
+pydantic>=2.12.5
+fastapi>=0.135.3
+uvicorn[standard]>=0.31
+python-dotenv>=1.0

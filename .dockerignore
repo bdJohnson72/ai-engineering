@@ -1,0 +1,45 @@
+# Keep the upload context narrow — agent is self-contained under soto_agent/.
+# The whole monorepo (courses, sandbox, kaggle, notebooks) gets excluded
+# directly; we explicitly list directories rather than use `*` + `!soto_agent/`
+# because az acr build has been observed to drop the referenced Dockerfile
+# when the negation pattern resolves the build-context view.
+
+# Monorepo dirs that aren't part of the agent
+courses/
+sandbox/
+kaggle/
+projects/
+docs/
+.claude/
+.cursor/
+.vscode/
+.idea/
+.git/
+.pytest_cache/
+.ruff_cache/
+.venv/
+node_modules/
+
+# Top-level files unrelated to the agent
+pyproject.toml
+uv.lock
+README.md
+CLAUDE.md
+journal.md
+current_learning_plan.md
+*.ipynb
+
+# Dev-only artifacts inside the agent
+soto_agent/__pycache__/
+soto_agent/**/__pycache__/
+soto_agent/.pytest_cache/
+soto_agent/tests/
+soto_agent/evals/runs/
+soto_agent/scripts/
+soto_agent/Makefile
+soto_agent/CONTEXT.md
+soto_agent/README.md
+
+# OS / editor noise
+.DS_Store
+*.swp
