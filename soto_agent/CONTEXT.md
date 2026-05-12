@@ -16,6 +16,31 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | **2026-05-29** | Live demo — possibly COO present. Must be solid. |
 | **5/20–5/29** | "Plug-the-embarrassment" window. |
 
+## Where we left off (end of 2026-05-12)
+
+**Steps 1-5 done + Dockerfile pushed to ACR. Container App not yet created.** Next session opens with `az containerapp create` against the just-pushed image.
+
+Today's progress (Tue 5/12):
+- `tools/glossary_lookup.py` — boot-load parser (55 canonical + 7 ambiguities); merge-on-overlap (e.g. "Promotion") surfaces both definition + ambiguity note. Wired into `app.py` TOOLS/_DISPATCH; `_serialize_tool_result` generalized to any pydantic BaseModel.
+- `tests/test_glossary_lookup.py` — first pytest file in the repo, 19 cases, all green.
+- `server.py` — FastAPI `POST /soto-agent`; sync route, Pydantic request body, error path uses `logger.exception` + 500 HTTPException.
+- `scripts/build_vault_subset.py` — denylist filter of local Obsidian vault into `soto_agent/data/vault/`. Filters `index.md` rows in place (preserves curated 1-liners).
+- `Makefile` — test / refresh-glossary / vault / prep / image / deploy / run / clean.
+- `data/ubiquitous-language.md` — committed copy of the glossary. Source-of-truth still in BCC_NGST_CG; `make refresh-glossary` syncs.
+- `data/vault/` — gitignored build artifact (1600 files / 6.1 MiB).
+- `Dockerfile` + slim `requirements.txt` + `.dockerignore` — python:3.12-slim, ~150-200 MB image.
+- **First image pushed:** `bbcsotoacr.azurecr.io/soto-agent:latest` via `az acr build` (37s).
+- Wiki bug fixed mid-session — page-selector LLM had been inventing a `Entities/` folder prefix from the stats-table category label. Hardened the selector prompt + added a basename-rglob fallback in `_resolve_page_path`.
+
+Smoke tests via `make run` + curl confirm:
+- Glossary lookup roundtrip (merge case for "Promotion").
+- Wiki search → read → synthesize on "Who is Matt Withington?" using the **subset** vault (`VAULT_PATH=soto_agent/data/vault`).
+
+Carries to Wed 5/13:
+- `server.py` needs a `/health` endpoint before Container App probes can succeed.
+- `az containerapp create` not yet run. No FQDN yet.
+- Env-var matrix for the container is unwritten (next session's first artifact).
+
 ## Where we left off (end of 2026-05-08)
 
 **Steps 1-3 done. Three models benchmarked. ACR provisioned. Ready for Mon 5/11 deploy work.**
@@ -77,26 +102,49 @@ User wants SF connected sooner. Originally tools first → FastAPI → deploy �
 
 User has **Contributor** on `BBC-ITBS-POC-EastUS`, verified 2026-05-08.
 
-## Mon 5/11 — first 30 min of work
+## Wed 5/13 — first 30 min of work
 
 ```bash
-# 1. Confirm az tooling is current
+# 1. Verify state from Tue 5/12 EOD
+cd ~/ai-engineering
+git log --oneline -6   # should show 3 fresh commits ending at 498edc7 "Dockerfile + slim requirements; first ACR image pushed"
+az acr repository show-tags --subscription cebd9dd6-bc18-4e1c-9564-bd4ec13c565b -n bbcsotoacr --repository soto-agent -o table  # should show 'latest'
+
+# 2. Add /health endpoint to soto_agent/server.py — Container App startup/liveness probes need it.
+#    Minimal: @app.get("/health") -> {"status": "ok"}.
+#    Then make image to push an updated tag.
+
+# 3. Create the Container App. Sketch:
+az containerapp create \
+  --subscription cebd9dd6-bc18-4e1c-9564-bd4ec13c565b \
+  --resource-group BBC-ITBS-POC-EastUS \
+  --name soto-agent \
+  --image bbcsotoacr.azurecr.io/soto-agent:latest \
+  --ingress external --target-port 8000 \
+  --registry-server bbcsotoacr.azurecr.io \
+  --secrets azure-openai-api-key=<paste> \
+  --env-vars \
+      AZURE_OPENAI_ENDPOINT=https://foundry-itbs-poc-2.cognitiveservices.azure.com/ \
+      AZURE_OPENAI_API_VERSION=2024-12-01-preview \
+      AZURE_OPENAI_DEPLOYMENT_CHAT=gpt-4.1-mini \
+      AZ_GPT_FOUR_ONE=<deployment name> \
+      SOTO_MODEL=gpt-4.1 \
+      AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key
+
+# 4. Smoke curl against the FQDN that az returns.
+```
+
+Then: step 7 — Named Credential URL swap on the SF side.
+
+Earlier-session runbook (Mon 5/11 — preserved for reference, not the active path):
+
+```bash
 az extension add --name containerapp --upgrade
 az provider register --namespace Microsoft.App
 az provider register --namespace Microsoft.OperationalInsights
-
-# 2. Confirm subscription
-az account show -o table  # should be cebd9dd6-bc18-4e1c-9564-bd4ec13c565b
-
-# 3. Confirm ACR is reachable
+az account show -o table
 az acr show -n bbcsotoacr -o table
-
-# 4. Resume code work in this directory
-cd ~/ai-engineering
-git log --oneline -10  # see 9 soto_agent commits since 5/8
 ```
-
-Then: write `tools/glossary_lookup.py` (user-driven), wire it into `app.py` TOOLS + _DISPATCH (user-driven, locks tool-registration learning), add `Dockerfile` + FastAPI route, `az containerapp up`.
 
 ## Streaming UX — Path A specification (locked 2026-05-08)
 
@@ -259,7 +307,7 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 | Q | When to decide |
 |---|----------------|
 | Single PE channel w/ `Source__c` discriminator OR new PE per tool? | When 2nd tool ships SF-side |
-| `glossary_lookup` reads file on disk OR loaded into memory at boot? | When building tool |
+| ~~`glossary_lookup` reads file on disk OR loaded into memory at boot?~~ | **Resolved 2026-05-12: boot-load.** File is 137 lines + stable. Parsed once at import; cached in module-level dicts. |
 | Vocabulary primer compression: hand-curate OR LLM-generate from glossary? | Resolved 2026-05-08: hand-curated v0.1 at ~1.2K tokens (no compression — under attention-dilution ceiling). Revisit only if eval shows tool-selection drift. |
 | Cross-model eval: `gpt-5` family, `deepseek`, `claude-sonnet-4.x` vs `gpt-4.1-mini` | Post-demo. Add model name as env var so swap is config-only. Keep prompts model-agnostic. |
 | Genie space tuning vs raw MCP for direct SQL — which wins on what query types? | Eval Mon 5/12 + post-demo |
@@ -269,33 +317,57 @@ Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-Eas
 
 ## Build order (REVISED 2026-05-08 — spine before tools)
 
-1. ✅ **Wiki primitives** — `wiki_search` + `wiki_read` in `tools/wiki.py`. Done 2026-05-08.
+1. ✅ **Wiki primitives** — `wiki_search` + `wiki_read` in `tools/wiki.py`. Done 2026-05-08. (Patched 2026-05-12: selector prompt hardened + basename rglob fallback after `Entities/` folder hallucination.)
 2. ✅ **Vocabulary primer** — `prompts/system_prompt.md`, ~1.2K tokens hand-curated. Done 2026-05-08.
-3. ✅ **Agent loop skeleton** — `soto_agent/app.py` with `run_agent`, `_MODEL_BUILDERS` registry, tool dispatch, while-loop until no tool_calls. Done 2026-05-08. **Note:** Claude wrote the loop in this session; user flagged this as overreach. Recovery via option C: user writes the next tool's function + TOOLS schema entry + _DISPATCH mapping (steps 4a/4b/4c).
-4. ⬜ **Glue tools to loop** — `glossary_lookup` first (Mon AM), then `databricks_query` (Wed-Thu), then `salesforce_query` (Thu-Fri).
-5. ⬜ **FastAPI route** — wrap `run_agent` as `POST /soto-agent` returning JSON `{answer: str}`. Mon 5/11 AM.
-6. ⬜ **Azure deploy** — `az acr build` against `bbcsotoacr` + `az containerapp up`. Mon 5/11 PM.
-7. ⬜ **SF integration** — Named Credential URL swap to deployed Container App. Tue 5/12.
+3. ✅ **Agent loop skeleton** — `soto_agent/app.py` with `run_agent`, `_MODEL_BUILDERS` registry, tool dispatch, while-loop until no tool_calls. Done 2026-05-08.
+4. **Glue tools to loop:**
+   - 4a. ✅ `glossary_lookup` (Tue 5/12). User wrote function + Pydantic + TOOLS/_DISPATCH; Claude wrote parser glue.
+   - 4b. ⬜ `databricks_query` — Wed-Thu (after step 7 spine lands).
+   - 4c. ⬜ `salesforce_query` — Thu-Fri.
+5. ✅ **FastAPI route** — `soto_agent/server.py`, `POST /soto-agent` returning `{answer: str}`. Tue 5/12. Needs `/health` added before Container App probes.
+6. **Azure deploy — split:**
+   - 6a. ✅ Dockerfile + slim `requirements.txt` + `.dockerignore` + Makefile orchestration. First image `bbcsotoacr.azurecr.io/soto-agent:latest` pushed via `az acr build`. Tue 5/12.
+   - 6b. ⬜ `az containerapp create` — Wed 5/13. Wires secrets + env vars + ingress + probes.
+7. ⬜ **SF integration** — Named Credential URL swap to deployed Container App. Wed 5/13 PM (depends on 6b returning an FQDN).
 
 **Re-order rationale:** Step 4 (rest of tools) shifted AFTER 5-6-7 so SF integration spine is live by Tue 5/12. Adding tools later = no SF-side changes. See "Where we left off" section above for the full revised week timeline.
 
-## Repo layout (target)
+## Repo layout (actual, end of 2026-05-12)
 
 ```
 /Users/brooksjohnson/ai-engineering/soto_agent/
 ├── __init__.py
-├── app.py                    # FastAPI + agent loop entry
+├── app.py                    # agent loop entry + CLI; run_agent(question, ...)
+├── server.py                 # FastAPI POST /soto-agent (wraps run_agent)
+├── Dockerfile                # python:3.12-slim image; CMD = uvicorn server:app
+├── requirements.txt          # slim runtime deps (openai/pydantic/fastapi/uvicorn/dotenv)
+├── Makefile                  # test / refresh-glossary / vault / prep / image / deploy / run / clean
+├── CONTEXT.md                # this file
 ├── tools/
 │   ├── __init__.py
-│   ├── wiki.py               # wiki_search + wiki_read primitives (build first)
-│   ├── glossary_lookup.py
-│   ├── databricks_query.py
-│   └── salesforce_query.py
+│   ├── wiki.py               # wiki_search + wiki_read (done)
+│   ├── glossary_lookup.py    # glossary_lookup (done)
+│   ├── databricks_query.py   # (planned Wed 5/13)
+│   └── salesforce_query.py   # (planned Thu-Fri)
 ├── prompts/
 │   └── system_prompt.md      # vocabulary primer + agent instructions
-├── CONTEXT.md                # this file
-└── README.md
+├── scripts/
+│   ├── __init__.py
+│   └── build_vault_subset.py # filters local Obsidian vault -> data/vault/
+├── tests/
+│   ├── __init__.py
+│   └── test_glossary_lookup.py  # 19 pytest cases
+├── evals/
+│   ├── __init__.py
+│   ├── run_evals.py
+│   ├── test_cases.jsonl
+│   └── runs/
+└── data/                     # baked-in container data (vault subset is gitignored)
+    ├── ubiquitous-language.md   # committed copy; refreshed via Makefile
+    └── vault/                   # 1600 .md files + filtered index.md (build artifact)
 ```
+
+Plus repo-root assets: `.dockerignore`, `.gitignore` (with `soto_agent/data/vault/` entry).
 
 ## Anti-goals (explicitly not doing for v1)
 

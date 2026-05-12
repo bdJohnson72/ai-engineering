@@ -1,15 +1,242 @@
-# Current Learning Plan — Beer RAG Sprint
+# Current Learning Plan — Beer RAG (ongoing) + Pricer Skill Build
 
-> **Session restart pointer (last updated 2026-04-28):** If restarting, read in this order: (1) this plan, (2) `~/.claude/projects/-Users-brooksjohnson-ai-engineering/memory/MEMORY.md` and the files it points to (auto-loaded but worth confirming), (3) `sandbox/beer_rag_app/ingest.py` for current code state, (4) `sandbox/beer_rag_app/vector_db/` exists on disk with 6964 vectors persisted.
+> **Session restart pointer (last updated 2026-05-12):** If restarting, read in this order: (1) `soto_agent/CONTEXT.md` "Where we left off (end of 2026-05-12)" — most current state of the demo build, (2) the new 2026-05-12 status block at the very top of this plan (immediately below), (3) `.claude/sessions/2026-05-12-1531-soto-agent-glossary-fastapi-acr.md` for the day's learnings + compound review, (4) older pivot blocks for context (2026-05-08, 2026-05-06, etc. — all preserved below), (5) `~/Documents/Obsidian Vault/Notes/Calmatic/Active Projects.md` slot 1 ("BBC Industry Intel Platform — Sales Coach Demo"), (6) `~/Documents/Obsidian Vault/Notes/Calmatic/Global Working Memory.md` for daily working memory.
+
+> **STATUS 2026-05-12 EOD — steps 1-5 done + first ACR image pushed. Container App next.**
 >
-> **Where we are (end of Mon 2026-04-27 work session):** Full ingest pipeline complete and verified end-to-end on the entire vault: **1457 docs → 7128 chunks → 6964 unique vectors persisted to Chroma** (collection `beer_rag` at `sandbox/beer_rag_app/vector_db/`). Pipeline path: `get_vault_docs → load_document → strip_frontmatter → split_on_headings → char_window → create_chunks → create_embeddings (batched, deduped) → Chroma upsert (batched)`. Bug history along the way (all resolved): empty page_content from heading-only sections; SHA-256 ID collisions from cross-file boilerplate; OpenAI 300K-token-per-request cap; Chroma ~5461-per-call upsert cap.
+> The agent has been built up incrementally over Sat 5/9 → Tue 5/12. End-of-Tuesday state:
+> - **Step 1 ✅ Wiki primitives** (`wiki_search`/`wiki_read`). Patched today after a selector-LLM hallucination ("Entities/" folder prefix) returned an empty page; selector prompt hardened + basename rglob fallback added.
+> - **Step 2 ✅ Vocabulary primer** (`prompts/system_prompt.md`, ~1.5K tokens after disambiguation/comparison/efficiency rule additions).
+> - **Step 3 ✅ Agent loop skeleton** (`app.py` with model registry, tool dispatch, MAX_TURNS=20).
+> - **Step 4a ✅ `glossary_lookup`** (today). Parses `BCC_NGST_CG/docs/reference/ubiquitous-language.md` at import; 55 canonical + 7 ambiguities; merges canonical+ambiguity on overlap (e.g. "Promotion"). First pytest file in the repo (`soto_agent/tests/test_glossary_lookup.py`), 19 cases, all green.
+> - **Step 4b ⬜ `databricks_query`** — Wed 5/13 afternoon (after deploy spine).
+> - **Step 4c ⬜ `salesforce_query`** — Thu-Fri.
+> - **Step 5 ✅ FastAPI route** (today). `soto_agent/server.py` POST /soto-agent. Sync `def` route, Pydantic body, `logger.exception` on error. Needs `/health` added Wed AM for Container App probes.
+> - **Step 6a ✅ Dockerfile + slim deps + Makefile.** Image `bbcsotoacr.azurecr.io/soto-agent:latest` built via `az acr build` (37s).
+> - **Step 6b ⬜ `az containerapp create`** — Wed 5/13. Secrets + env vars + ingress=external + port=8000.
+> - **Step 7 ⬜ SF Named Credential URL swap** — Wed 5/13 PM, after 6b returns an FQDN.
 >
-> **Immediate handoff state:** Day 1 carryover still has **two pieces left** before Day 2 (eval baseline) can start: `answer.py` and `app.py`. The assistant is paused on `answer.py`'s system prompt design — three open decisions waiting on the user (refuse-vs-hedge behavior, citation behavior, context formatting) plus a `top_k` value (plan suggests 8). Once those are decided, user writes `answer.py`; assistant reviews. Then `app.py` (small Gradio wrapper) finishes Day 1.
+> **New today, supporting infra (not in original plan):**
+> - `soto_agent/scripts/build_vault_subset.py` — denylist-based filter of the user's local Obsidian vault into `soto_agent/data/vault/` (1600 .md files, 6.1 MiB). Filters `index.md` rows in place to preserve hand-curated summaries; deny patterns scoped to personal/AI-eng content. Output is gitignored (build artifact).
+> - `soto_agent/Makefile` — `test`, `refresh-glossary`, `vault`, `prep`, `image`, `deploy`, `run`, `clean`. Wraps the full build flow so prep can't be forgotten before `az acr build`.
+> - `soto_agent/data/ubiquitous-language.md` — committed copy of the BBC glossary. `make refresh-glossary` syncs from BCC_NGST_CG when SF team updates the source.
+>
+> **Gotchas saved as memory today:**
+> - `az acr build --file <path>` is **cwd-relative, not context-relative.** Makefile must `cd` to context dir or build fails with "Unable to find Dockerfile." Saved at `insight_az_acr_build_file_path.md`.
+> - User flagged Python testing as a learning-plan gap. Saved at `user_python_testing_gap.md`. Add a pytest block to the post-demo learning posture (likely Week 2-3 post 5/30 when Pricer Wk 6 resumes).
+>
+> **Demo timeline reaffirmed:**
+> - Wed 5/13: containerapp create + SF integration spine (LWC reaches live agent — wiki + glossary only).
+> - Thu-Fri: `databricks_query` + `salesforce_query` tools wired into the deployed agent.
+> - Sat-Sun 5/16-17: buffer / refinements.
+> - Tue 5/19: pre-demo dry run.
+> - **Wed 5/20: CTO dry run.** Explainable hallucinations OK.
+> - **Fri 5/29: live demo (possibly COO).** Must be solid.
+>
+> **v2 plan (post-5/29):** Mosaic AI Agent Framework on Databricks. **Its own repo** — not this monorepo. User confirmed today that `ai-engineering/` is a learning monorepo with unrelated torch/transformers/langchain in `pyproject.toml`; v2 starts with a clean dep tree. Memory at `project_soto_v2_databricks.md`.
+>
+> **Learning track posture through 5/29 (unchanged):**
+> - Pricer Wk 6 — paused 5/6 → 5/30. Resume after demo.
+> - Ed Donner Agent Course — 1_foundations active, then 2_openai, then 6_mcp (week of 5/19). Frameworks deferred.
+> - LangChain/LangGraph passive viewing OK; do NOT refactor demo code into framework before 5/29.
+
+> **PIVOT 2026-05-08 — Sales Coach demo + 3-tool agent + wiki primary retrieval.** Peter demo review Thu 5/8 PM revealed: **dry run 5/20 with CTO present, live demo 5/29 possibly with COO present.** Stakes higher than expected. Brooks confirmed BBC has formal permission to pass company data to Azure-hosted LLMs (Foundry) — compliance fully unblocked. Demo positioning locked as **Sales Coach application** (rep-facing assistant, but cross-business uses obvious).
+>
+> **Architecture rethink (driven by Brooks pushback during 5/8 shutdown):**
+> - **Wiki tool stays primary retrieval tier.** Per `feedback_structured_wiki_beats_chunk_rag.md` 2026-05-06: LLM reading wiki + following wikilinks consistently beats chunked RAG retrieval in Brooks's hands. Holds even though Brooks hasn't yet tried query rewriting / rerankers / AI Search semantic ranker.
+> - **Genie demoted to fallback.** Genie was originally just plumbing test (NL→SQL on a curated subset). With agents + Databricks MCP via Unity Catalog, agent has full schema access. Genie middleware retained for SF write-back use cases (NGEN-5882/5884 PE plumbing not wasted) but no longer primary agent retrieval tool.
+> - **Salesforce becomes 3rd data source.** Account context (open opps, recent visits, custom fields) lives only in SF. Demo path: Apex callout via existing NGEN-5882 middleware (sunk-cost win). Production path: dedicated SF data MCP, post-demo.
+>
+> **Demo v1 (5/29) — 3 confirmed tools:**
+> 1. `wiki_query` — wraps existing `/wiki-query` skill workflow as Python + FastAPI endpoint. Reads `Notes/index.md` → LLM picks pages → reads pages → LLM synthesizes answer. **TODAY 5/9 critical path build.**
+> 2. `databricks_query` via MCP — Brooks-built Databricks MCP from 2026-03-11. Eval Mon 5/12 (5 representative sales questions). Fallback if hallucination >20%: wrap Genie inside MCP path as guardrail.
+> 3. `salesforce_query` — Apex callout via NGEN-5882 middleware path for demo. Returns structured account context.
+>
+> **Possible 4th tool (decision Wed 5/14):** `vector_retrieve` via AI Search w/ semantic ranker. AI Search demoted to **Option B** — eval head-to-head vs wiki Mon 5/12. Add only if eval shows lift over wiki on specific query types. AI Search resource provisioned 5/8; `ingest_aisearch.py` work continues but lower priority than wiki_tool.
+>
+> **UX direction — streaming LWC vs PE round-trip:** Existing PE round-trip path (~6-15s silent wait) bad for chat UX. Brooks proposed direct LWC → Container App SSE streaming, skipping Apex/PE for chat. Auth via short-lived JWT minted by Apex once-per-session. **Stretch for 5/29 demo if Sat 5/10 v1 deploy lands clean; else post-demo polish.** Rule that emerged: PE plumbing for "agent writes back to SF" use cases (async, audit-trail). Direct streaming for "user chats with agent" (sync-feeling, sub-second). Same agent, two surface areas.
+>
+> **5/20 dry run vs 5/29 live posture:** Dry run = explainable hallucinations OK. Live = must be solid. 9 days between = the plug-the-embarrassment window.
+>
+> **Sales Coach demo narrative locked:**
+> > "Rep asks 'How am I tracking on FMB this quarter for these 3 accounts?' Agent pulls account info from SF, pulls volume data from Databricks, pulls Twisted Tea launch context from internal wiki, composes the coaching answer. Streamed live to LWC."
+>
+> **Time budget revised:** "company priority + extra time over next couple weeks" = ~22-28h/week available (up from prior ~16-18h). Salesforce sprint overhead presumed reduced. Buys breathing room for AI Search eval + LWC streaming spike.
+>
+> **Learning track posture through 5/29:**
+> - Pricer Wk 6 — PAUSED 5/6 → 5/30 (re-confirmed 5/8). Resume after demo.
+> - Ed Donner Agent Course — 1_foundations active, then 2_openai, then 6_mcp (week of 5/19). Frameworks (3_crew, 4_langgraph, 5_autogen) DEFERRED to post-5/29. **LangChain/LangGraph study explicitly deferred** per 5/8 conversation — direct-API agent first, frameworks as A/B comparison post-demo.
+> - Chip Huyen Ch 6 RAG/Agents — finish Sat 5/10.
+> - Passive Ed Donner LangChain/LangGraph video viewing on the side OK; do NOT refactor demo code into framework before 5/29.
+>
+> **Brooks's new working dir (2026-05-09):** Brooks created `~/ai-engineering/BBC demo/` (or similar — confirm name; spaces in dir names cause Python import issues, suggest renaming to `bbc_demo/` if confirmed). This may become primary build dir, possibly replacing or supplementing `sandbox/beer_rag_app/`. Confirm intent at next session restart.
+>
+> **Revised deployment names + endpoints (carry-forward):**
+> ```
+> AZURE_OPENAI_ENDPOINT=https://foundry-itbs-poc-2.cognitiveservices.azure.com/
+> AZURE_OPENAI_API_VERSION=2024-12-01-preview
+> AZURE_OPENAI_DEPLOYMENT_CHAT=gpt-4.1-mini
+> AZURE_OPENAI_DEPLOYMENT_EMBED=text-embedding-3-small
+> AZURE_SEARCH_ENDPOINT=<TBD — Brooks provisioned 5/8>
+> AZURE_SEARCH_INDEX=beer-rag-v1
+> ```
+> Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-EastUS`. Region: East US. Foundry resource: `Foundry-ITBS-POC-2`.
+>
+> **Existing infrastructure pointer — `bbc-sf-middleware` (added 2026-05-09):**
+> - **Repo:** `~/bbc-sf-middleware` — Azure Functions v2, Python programming model. Entry: `function_app.py`. Decorator-based (`@app.route(...)`); no `function.json` files.
+> - **What it does today:** SF → Azure Function → Databricks Genie API, with response returned **asynchronously** to SF via Platform Event `Account_Intelligence__e` (correlation ID threads the round trip). NGEN-5882/5884 closed; this is the production Genie path.
+> - **Endpoints:** `GET /health`, `POST /genie`. `/genie` body fields: `accountName, accountId, iStoreNumber, query, correlationId, conversationId?` (last is optional — present for multi-turn Genie history). Response: HTTP 200 with `{correlationId, status, result}` AND a Platform Event publish containing `CorrelationId__c, Status__c, Result__c` (or `Message__c` on error).
+> - **Inbound auth:** Function-level API key (`AuthLevel.FUNCTION`). **Outbound auth (Function → SF):** OAuth client credentials flow against `SF_INSTANCE_URL/services/oauth2/token` (Connected App).
+> - **Genie execution flow:** Databricks SDK `WorkspaceClient` → `genie.start_conversation` (or `genie.create_message` for follow-up turn) → `wait.result(timeout=120s)` → if SQL returned, `execute_message_query` then poll `statement_execution.get_statement` until `SUCCEEDED/FAILED/CANCELED/CLOSED`. Hard caps: 60s SQL exec timeout, 50-row PE payload cap, 230s Azure HTTP function ceiling.
+> - **Env vars expected:** `SF_INSTANCE_URL, SF_CLIENT_ID, SF_CLIENT_SECRET, DATABRICKS_HOST, DATABRICKS_TOKEN, DATABRICKS_GENIE_SPACE_ID`.
+> - **Result model:** `models/genie.py::GenieResult` — pydantic; carries `sql_query`, `columns`, `rows`, plus Genie's clarification text. Serialized to JSON for the PE `Result__c` field.
+> - **Implication for `soto_agent` (the new dir, this week's build):** This middleware is the SF↔Azure transport for the **Genie tool**, not for the wiki tool. Open architecture question for 5/10–5/12: does `wiki_query` route through this Function App (add a new `@app.route("wiki-query")` alongside `genie`, reuse PE plumbing) OR live in a separate FastAPI Container App (per 5/4 + 5/8 pivots)? Container App wins for streaming stretch (SSE) + agent-loop length, but adds a second deploy surface. Decision deferred to first session after `wiki_query` route works locally.
+> - **Sunk-cost win:** PE round-trip path already operational. Even if "user-chats-with-agent" surface goes direct LWC→Container App SSE, "agent-writes-back-to-SF" surface stays on this PE path. The two-surface rule from the 5/8 pivot lines up cleanly with what's already deployed.
+>
+> **Repo gotchas to respect (from `bbc-sf-middleware/CLAUDE.md`):** `print()` is filtered — use `logging`. Python enums ≠ their string values (compare `.value`). Prefer SDK `Wait.result()` over hand-rolled poll loops. `func start` zombies port 7071 — `lsof -ti :7071 | xargs kill -9` before restart. Databricks PATs need explicit Genie scope.
+>
+> **Salesforce-side durable contract (added 2026-05-09 — shipped in PR 15651, branch `docs/ngen5884-adrs`):**
+> - **ADRs that govern this:** `BCC_NGST_CG/docs/decisions/ADR-0017-async-to-user-via-platform-event-for-ai-integrations.md` + `ADR-0018-client-credentials-oauth-inbound-server-to-server.md`. Both `Status: Accepted` 2026-05-05. Treat these as the canonical pattern for ALL future AI integrations (wiki tool, vector retrieve, multi-tool agent — all follow this).
+> - **The SF surface is durable; the Azure side is what may move.** Whether `soto_agent` lives in the existing Function App (`sffuncpoc`) or a new Container App, the Salesforce contract stays the same.
+>
+> **Salesforce metadata shipped (PR 15651, ~1726 LOC across 19 files):**
+> - **Platform Event:** `Account_Intelligence__e` — fields `CorrelationId__c` (UUID, caller-generated in LWC), `Status__c` (`SUCCESS|ERROR`), `Result__c` (32 KB long-text JSON payload), `Message__c` (error text). 24-hour PE retention. Reusable channel — future AI integrations can extend `Result__c` schema OR create new PEs following the same shape.
+> - **Apex:** `AccountIntelligenceController.queryAccountIntelligence(accountId, query, correlationId, conversationId)` — 4-arg @AuraEnabled method. First-turn Apex enriches with account context (`iStoreNumber`); continuation turns skip enrichment (Genie remembers via `conversation_id`). Fire-and-forget callout — response body unused; PE delivers the answer.
+> - **LWC:** `accountIntelligence` (HTML/JS bundle). Subscribes to PE channel ONCE in `connectedCallback`, unsubscribes in `disconnectedCallback`, filters incoming events by `correlationId`. 2-minute client-side timeout w/ Retry button. Inline error rendering — no toasts. **Critical anti-pattern fixed in 5/4 dev:** subscribing inside `handleClick` stacked listeners → duplicate transcript entries; same class as NGEN-5777 anti-double-DML lesson. `/lwc-tdd` REVIEW phase now checks for it.
+> - **Connected App:** `Account_Intelligence_Azure` — `client_credentials` grant. Runs as designated user (POC: `brooks.johnson@bostonbeer.com.<sandbox>`; production: dedicated integration user). Per-org Consumer Key + Secret minted on first activation — does NOT transfer between orgs. ECA migration deferred (production hardening).
+> - **Named Credential:** `Azure_Account_Intelligence_EC` (URL = Function host + `?code=<host-key>`).
+> - **External Credential:** `azure_health_func`.
+> - **Permission Set:** `Account_Intelligence` — grants Create on PE + field-level access. Must be assigned to run-as user per-org (does NOT carry through metadata).
+> - **Function App:** `sffuncpoc` in `BBC-ITBS-POC-EastUS`, host `sffuncpoc-bne6dsbsfcbpbqbn.eastus-01.azurewebsites.net`, route `/api/genie`. Python 3.13.
+>
+> **Round-trip flow (canonical — memorize):**
+> 1. User clicks "Ask AI" in LWC. LWC generates `correlationId` UUID.
+> 2. LWC → imperative `@AuraEnabled` Apex (`queryAccountIntelligence`).
+> 3. Apex → callout via Named Credential → `POST /api/genie` with `{accountName, accountId, iStoreNumber, query, correlationId, conversationId?}`. Apex callout cap = 120s; uses fire-and-forget contract.
+> 4. Function does Genie work (start_conversation OR create_message → execute_message_query → poll statement_execution).
+> 5. Function mints SF token via `client_credentials` against `<org>.my.salesforce.com/services/oauth2/token`.
+> 6. Function publishes PE `{CorrelationId__c, Status__c: SUCCESS, Result__c: GenieResult JSON}` (or `Status__c: ERROR, Message__c: ...`) via REST `POST /sobjects/Account_Intelligence__e`.
+> 7. PE fires → LWC's empApi callback → filter by `correlationId` → render datatable + transcript.
+>
+> **Per-org deploy NOT carried by metadata (manual every new org — full 10-step runbook in ADR-0018):**
+> 1. Confirm Connected App deployed (SOQL `ConnectedApplication`).
+> 2. **Tick "Enable Client Credentials Flow"** in App Manager → app → View → Edit (the metadata XML doesn't carry this checkbox).
+> 3. Set Permitted Users = "Admin approved users are pre-authorized".
+> 4. Set Run-As user (Client Credentials Flow section appears only after step 2).
+> 5. Assign Permission Set: `sf org assign permset -n Account_Intelligence -o <user>`.
+> 6. Add Permission Set to Connected App's allowed list.
+> 7. Update Azure App Settings with **NEW per-org Consumer Key + Secret** via `az functionapp config appsettings set` (UI two-stage commit drops values).
+> 8. **Force-recycle** Function workers: `az functionapp stop && start` (graceful restart leaves cached env vars in mid-flight workers).
+> 9. Update Named Credential URL with current Azure host key (`az functionapp keys list --query "functionKeys.default"`).
+> 10. Smoke test: curl token mint, then click "Ask AI" in LWC.
+>
+> **Critical config gotchas seared into the runbook:**
+> - `SF_INSTANCE_URL` MUST be `<org>.my.salesforce.com` (API host), NOT `lightning.force.com` (UI host). UI host triggers cross-host redirect → `requests` mangles POST body → `unsupported_grant_type` 400.
+> - `SF_INSTANCE_URL` value pasted into App Settings = value only, NOT `KEY=VALUE` literal (causes `InvalidSchema: No connection adapters found`).
+> - Azure App Settings UI has a two-stage commit (pane Apply + page Apply); always prefer `az` CLI to bypass.
+> - `databricks-sdk` is pinned (POC blocker fix); do not auto-bump.
+>
+> **Domain vocabulary source — `BCC_NGST_CG/docs/reference/ubiquitous-language.md` (added 2026-05-09):**
+> - 137-line canonical glossary of BBC business terms (RO, MOB, COT Priority, Chain Mandate, Smart Rec, PRIME, SOTO, B.A.S.E., Three-Tier, Customer Set, Anchor Account, etc.) with mappings to Salesforce object API names. Includes 4-source RO breakdown, 8 Retailer Template Prefixes, 7 flagged ambiguities ("Objective", "Promotion", "Survey", etc.).
+> - **SOTO is defined here** — Situation/Objectives/Tools/Objections; the **Prepare** step of PRIME. Agent dir name `soto_agent/` matches.
+> - **Agent integration plan (3 layers):**
+>   - **System prompt seed:** compress ~30 most common terms into ~600-token vocabulary primer; always loaded; prompt-cache makes it ~free after first call. Cuts a tool call for common questions.
+>   - **`glossary_lookup` tool:** exposes full file contents for precise lookups when agent senses ambiguity.
+>   - **`wiki_query` tool:** stays the primary synthesis/multi-page tool; glossary handles vocabulary, wiki handles knowledge.
+> - **File ownership:** read directly from `BCC_NGST_CG/docs/reference/ubiquitous-language.md` at agent boot. Don't copy into vault — single source of truth (the SF team reviews/owns it). Acceptable interim: symlink into `Notes/` if filesystem access from agent host is awkward in v1.
+>
+> **Implication for `soto_agent` (this week's build):** When `wiki_query` and the agent loop need to surface in Salesforce, the path is **not new SF metadata** — it's reusing this contract. Two options:
+> - **Reuse `Account_Intelligence__e` PE** with a `Source__c` discriminator added — single channel, multi-tool. Cheapest.
+> - **New PE per tool** (`Wiki_Query__e`, `Soto_Agent__e`) — cleaner schema separation but more metadata to deploy per-org. Deferred decision.
+> Either way: the durable SF artifacts (Apex callout pattern, LWC subscribe pattern, Connected App, Permission Set, Named Credential URL) are the template. Don't redesign them. If `soto_agent` ends up in a new Container App rather than the existing Function App, that's an Azure-side change only — the SF-side `AccountIntelligenceController` (or its sibling) just calls a different endpoint URL via a new Named Credential. Auth flow + PE channel + correlationId routing all stay.
+
+
+
+> **PIVOT 2026-05-06 — Foundry stack + AI Search migration replaces self-hosted RAG plumbing.** Tue AM Azure portal investigation found `Foundry-ITBS-POC-2` already deployed in `BBC-ITBS-POC-EastUS` RG with Brooks holding Contributor inherited. Deployed `gpt-4.1-mini` (chat) + `text-embedding-3-small` (embeddings) — first AI Capability Center models on BBC infra. Compliance constraint (no direct openai.com calls with BBC data) is now resolved: all production LLM calls route through Foundry endpoint inside BBC tenant.
+>
+> **Architecture consequence:** v0/v1 deploy split dropped. Sat 5/10 ships **v1 with BBC vault data on real Foundry stack** (Container App + AI Search + Genie + `gpt-4.1-mini`). Standalone rewriter/reranker work folds into AI Search semantic ranker (built-in). Tue PM = Foundry orientation + Playground hands-on (Path A). Wed = AI Search provisioning + corpus migration (`ingest_aisearch.py`). Thu = `agent.py` skeleton using `AzureOpenAI` client + AI Search retrieval + Genie httpx. Fri = pricer Wk6 Day 3 (optional Foundry fine-tune pivot) + FastAPI wrap. Sat = Container App deploy.
+>
+> **Foundry as learning substrate (added 5/6):** Brooks committed to using Foundry as the place to apply growing skills — agents, fine-tuning, evals, indexes all live there. Ed Donner / Chip Huyen / DataQuest still teach the *why* (mechanics + intuition); Foundry is the *where* (BBC production stack). Each major code-pattern learned in Ed Donner gets a "how would I do this in Foundry" follow-up exercise.
+>
+> **Deployment names + endpoints (paste-ready):**
+> ```
+> AZURE_OPENAI_ENDPOINT=https://foundry-itbs-poc-2.cognitiveservices.azure.com/
+> AZURE_OPENAI_API_VERSION=2024-12-01-preview
+> AZURE_OPENAI_DEPLOYMENT_CHAT=gpt-4.1-mini
+> AZURE_OPENAI_DEPLOYMENT_EMBED=text-embedding-3-small  # adjust if deployment named differently
+> ```
+> Sub: `cebd9dd6-bc18-4e1c-9564-bd4ec13c565b` (BBC DevTest). RG: `BBC-ITBS-POC-EastUS`. Region: East US. Foundry resource: `Foundry-ITBS-POC-2`.
+
+> **PIVOT 2026-05-04 — Agentic-RAG MVP + Azure deploy substrate.** Architecture target shifts from "iterate retrieval quality on the vector RAG" to "agentic RAG running on Azure with two tools." Vector RAG (beer_rag_app) is no longer the answer; it becomes one tool inside an agent. Genie (via NGEN-5882/5884 middleware, now closed) is the second tool. Agent decides which to call. **The 4-row rewriter/reranker comparison table is dropped as a sprint deliverable** — rewriter + reranker fold into `vector_retrieve` as internal LLM helpers (Ed Donner Wk5 Day 5 pattern) so the wiki tool's quality is sharper before the agent wraps it. The understanding-it-deeply track for retrieval moves to Q3 with real demo questions.
+>
+> **LLM compliance constraint:** BBC policy forbids direct calls to public OpenAI/Anthropic APIs with company data. Production LLM must be Azure OpenAI Service (BBC-tenant-scoped, Microsoft-operated, contractually no training on inputs). Local dev stays on direct `OpenAI` client with synthetic/public data only. Code uses a `get_llm_client()` factory so the swap is one line. Mon 5/5 investigation: portal check + Mike Lavy DM + pricing math → email Peter / IT with facts. Self-serve / 1-week / procurement-event are the three timeline branches.
+>
+> **Deploy substrate decision:** Azure Container App + FastAPI, NOT Azure Function. Reasons: agent tool-call loops are stateful-ish and longer than Function time limits; Container Apps scale to zero; same Docker image runs locally for dev. DataQuest has FastAPI + Docker section — added to this week as Wed-Thu train reading.
+>
+> **v0 vs. v1 deploy:**
+> - **v0 (target Sat 5/10):** Container App on Azure with synthetic/public data, direct OpenAI API. Proves architecture end-to-end. **No BBC vault data.**
+> - **v1 (TBD by 5/16-5/24):** Same architecture, swap to Azure OpenAI client + BBC vault data once procurement clears.
+>
+> **PIVOT 2026-05-01 (still applies) — Two parallel tracks:**
+> - **Track P (pricer skill build)** — Ed Donner LLM Engineering Wk 6 day1-5 spread over 2 weeks. Fine-tuning mechanics on a non-BBC dataset. Skill acquisition for the eventual BBC fine-tune step.
+> - **Track B (Beer Intel app — ongoing)** — beer_rag_app continues. Now reframed as "build agent that uses beer_rag_app as a tool." Demo-able Azure-hosted artifact target ~5/10 (v0) and ~5/16-5/24 (v1).
+> - **AI Stacks L-credentials deprioritized** per 2026-05-01 user feedback. Real capability framing only.
+>
+> **Where we are (end of Sun 2026-05-03):** Track B Days 1-2 shipped (ingest.py + answer.py + app.py + evals/evaluation.py). Day 3 NOT shipped — Sat was study-shaped not sprint-shaped. State on disk:
+> - `beer_rag_app/ingest.py` — full pipeline working: 1457 docs → 7128 chunks → 6964 vectors in Chroma `beer_rag` at `sandbox/beer_rag_app/vector_db/`.
+> - `beer_rag_app/answer.py` — query flow: `fetch_content` → `make_rag_messages` → `answer_question`. v0.1 smoke-tested.
+> - `beer_rag_app/app.py` — Gradio chat wired through `answer_question`. Title "Beer-O-Matic".
+> - `beer_rag_app/evals/evaluation.py` — `TestQuestion` Pydantic + `load_tests` + retrieval metrics + `run_baseline()` + real `evaluate_retrieval` calling `fetch_content`.
+> - `beer_rag_app/test.jsonl` — 100 curated test queries.
+> - **Day 2 baseline run NOT yet executed.** Code shipped 4/30, run still pending. Optional now under new plan — only do if it informs `vector_retrieve` decisions.
+> - **Track P:** Wk6 Day 1 video watched 5/3. Day 1 notebook (`~/llm_engineering/week6/day1.ipynb`) NOT yet run. Day 2 (Mon 5/5) presumes Day 1 ran — may need to run Day 1 first thing Mon if not done.
+> - Middleware (NGEN-5882 + 5884): SF→Azure→Genie→SF round-trip plumbing CLOSED 5/1. Currently ships a canned prompt; Mon task swaps to plain-text query param.
+> - DataQuest decorators ~done. Inbox carry-forward: `functools.wraps` lesson Mon 5/5.
+>
+> **Immediate handoff state for Monday 2026-05-05:** Home day. Six items in priority order:
+> 1. **Azure OpenAI investigation** (60m total) — portal Subscriptions + Resource Providers (Microsoft.CognitiveServices) check, Mike Lavy Slack DM about AI Foundry status, pricing-calculator math for demo-scale usage. Document findings.
+> 2. **Genie plain-text query feature** (60m) — middleware: PE payload schema gets `{query}` field, Pydantic validates, Genie call uses incoming text. Apex test from local sandbox.
+> 3. **Wk6 Day 2 pricer dataset shaping** (90m) — `~/llm_engineering/week6/day2.ipynb`. If Day 1 not yet run, run Day 1 first.
+> 4. **Decorators close** (30m) — `functools.wraps` lesson.
+> 5. **Email Peter / IT** (15m, defer to Tue if Mon investigation incomplete) — Azure OpenAI access path with Mon's findings.
+> 6. **Read for Tue train** (no Mon time required) — OpenAI tool-calling guide bookmarked for Tue commute.
+>
+> **Operational TODOs flagged but deferred:**
+> - Re-running `ingest.py` currently re-embeds the whole corpus (~$0.02 each run). Add `--reingest` flag gating later if iteration cost becomes annoying. Note: when v0 deploys to Azure, Container App will need to either (a) bake vector_db into image, (b) mount volume, or (c) re-ingest at boot — design decision for Sat 5/10.
+> - `crete_embeddings` typo (function name) — fix when next touching ingest.py (Wed 5/7 when wrapping `vector_retrieve`).
+> - Mutable default arg `history=[]` in `answer.py` — fix to `history=None` + `if history is None: history = []` (Wed 5/7 same pass).
+> - Pre-baseline check (now optional under new plan): confirm `OPEN_AI_MODEL = "gpt-4.1-nano"` (not "gpt-5.5") in `answer.py`.
+> - Naming flag (non-blocking): current `mrr` is keyword-MRR not query-MRR. Either rename to `keyword_mrr` or add docstring before publishing numbers anyone quotes.
+> - **NEW:** `get_llm_client()` factory function — Wed 5/7. Wraps `OpenAI()` vs `AzureOpenAI()` selection by env var. All LLM calls in beer_rag_app route through it.
+> - **NEW:** Container App deployment design — Sat 5/10 decision: vector_db baking strategy, env var management for OPENAI_API_KEY (later AZURE_OPENAI_ENDPOINT/KEY/API_VERSION), how to expose middleware endpoint URL to agent.
+
+> **Old session restart pointer (2026-05-02) preserved below for the day-by-day Days 1-3 sprint sections — still useful as Track B history but the rewriter+reranker comparison-table objective is now dropped per 2026-05-04 pivot. Sat 5/2 / Sun 5/3 plan was the prior week; the actual outcomes are in Daily Metrics 5/1 fenced block + Weekly Plan 4/28 archive.**
+>
+> **PIVOT 2026-05-01 — Two parallel tracks now, not a single sprint:**
+> - **Track P (pricer skill build)** — Ed Donner LLM Engineering Wk 6 day1-5 spread over 2 weeks. Fine-tuning mechanics on a non-BBC dataset. Skill acquisition for the eventual BBC fine-tune step.
+> - **Track B (Beer Intel app — ongoing)** — beer_rag_app continues. Real business value. Demo-able artifact target ~5/16. Gets quality improvements (rewriter, reranker, chunking iteration) THIS weekend.
+> - **Multi-month arc (per BBC IIP north star):** Each Ed Donner concept applies to Beer Intel as homework next window. Wk 6 fine-tune → BBC tuned embeddings + generative ("speak beer") fine-tune. Wk 7 agents → agentic RAG / tool routing. Wk 8 capstone → integration. Project grows as engineer skills up; no demo deadline pressure.
+> - **AI Stacks L-credentials deprioritized** per 2026-05-01 user feedback. Real capability framing only. Azure + Databricks reintroduced when pricer stable as "deploy a service" / "join Databricks data" applied work, not L-gap closures.
+>
+> **Where we are (end of Thu 2026-04-30 work session):** Beer Intel sprint Days 1-2 fully shipped. Day 3 partially. State on disk:
+> - `beer_rag_app/ingest.py` — full pipeline working: 1457 docs → 7128 chunks → 6964 vectors in Chroma collection `beer_rag` at `sandbox/beer_rag_app/vector_db/`.
+> - `beer_rag_app/answer.py` — query flow: `fetch_content` → `make_rag_messages` → `answer_question`. v0.1 smoke-tested.
+> - `beer_rag_app/app.py` — Gradio chat wired through `answer_question`. Title "Beer-O-Matic".
+> - `beer_rag_app/evals/evaluation.py` — `TestQuestion` Pydantic + `load_tests` + retrieval metrics (`keyword_coverage`, `mrr`, `ndcg`) + `run_baseline()` aggregator + real `evaluate_retrieval` calling `fetch_content` (replaced fake smoke from 4/29).
+> - `beer_rag_app/test.jsonl` — 100 curated test queries.
+> - **Day 2 baseline run NOT yet executed.** Code shipped Thu, run pending Sat. OBSERVATIONS.md baseline section unwritten.
+> - **Day 3 pro techniques (rewriter, reranker, LLM chunking) — NOT YET BUILT.** Saturday sprint adds rewriter + reranker, per 2026-05-01 plan.
+>
+> **Immediate handoff state for Saturday 2026-05-02:** Beer Intel sprint day. Three blocks back-to-back: (1) run vanilla baseline → "Vanilla" row in OBSERVATIONS.md, (2) implement query rewriter (HyDE or multi-query) → re-run → "+ Rewrite" row, (3) implement reranker (Cohere Rerank API or BAAI/bge-reranker-base local) → re-run → "+ Rerank" + "+ Both" rows. Output: 4-row comparison table + 1 paragraph in OBSERVATIONS.md identifying which combo wins and where it fails. Tuesday's architecture decision (vanilla vs graph-RAG vs agentic) uses these results.
+>
+> **Sunday 2026-05-03 = pricer + reading day.** Ed Donner Wk 6 Day 1 (`~/llm_engineering/week6/day1.ipynb`) + Chip Huyen Ch 7 Finetuning + close Ch 6.
 >
 > **Operational TODOs flagged but deferred:**
 > - Re-running `ingest.py` currently re-embeds the whole corpus (~$0.02 each run). Add `--reingest` flag gating later if iteration cost becomes annoying.
-> - Debug print at `ingest.py:80` (`print(all_files[:5])` inside `get_vault_docs`) still firing on every run; cosmetic cleanup.
-> - Linter warnings on the `crete_embeddings` typo (function name) and the `chunks` shadowing in `__main__`.
+> - `crete_embeddings` typo (function name) — fix when next touching ingest.py.
+> - Mutable default arg `history=[]` in `answer.py` — fix to `history=None` + `if history is None: history = []`.
+> - Pre-baseline check Sat morning: confirm `OPEN_AI_MODEL = "gpt-4.1-nano"` (not "gpt-5.5") in `answer.py` before first eval run.
+> - Naming flag (non-blocking): current `mrr` is keyword-MRR not query-MRR. Either rename to `keyword_mrr` or add docstring before publishing numbers anyone quotes.
 
 **Window:** ~~Fri 2026-04-24 → Sun 2026-04-26~~ → **Slipped: Mon 2026-04-27 → Wed 2026-04-29** (3 days, ~2–3 hrs/day). Weekend lost to unplanned family commitments. Friday's chunker work stays banked; Days 1-3 below shift to Mon/Tue/Wed.
 **Roadmap tie-in:** [[BBC Industry Intel Platform]] Week 2 — knock-on effect: Week 3 (FastAPI + Docker) shifts from 4/28–5/4 to **4/30–5/4** (compressed from 7 to 5 days). Acceptable because DataQuest Part 4 (FastAPI/Docker conceptual track) can absorb some compression.
@@ -19,29 +246,65 @@
 
 ---
 
-## 1. Goal
+## 1. Goal (revised 2026-05-01)
 
-Take the in-flight beer RAG prototype from `sandbox/RAG_Beer_Intel.ipynb` (notebook) and land it as a **production-shaped Python module structure** with:
+**Two tracks running in parallel toward the BBC Industry Intel Platform north star** (per [[BBC Industry Intel Platform]] North Star Architecture section):
 
-1. A clean `beer_rag_app/` package (ingest → retrieve → answer) — no LangChain.
-2. A working **Gradio chat interface** hitting the pipeline.
-3. An **evaluation package** that measures retrieval *and* answer quality on BBC-relevant test queries, and a Gradio dashboard for the numbers.
+### Track B — Beer Intel app (ongoing, real business value)
 
-The code lives under `~/ai-engineering/sandbox/beer_rag_app/`. End-state is the thing Week 3 of the roadmap wraps in FastAPI + Docker. If you can't wrap it in a module this weekend, Week 3 slips.
+Take `beer_rag_app/` from "RAG breathes + retrieval metrics" to a **demo-able, deployable agentic intelligence service**. Layered improvements over multiple windows:
+
+1. ✅ **Pipeline + retrieval metrics** (Days 1-2 — done 4/27-4/30, baseline run pending)
+2. **Sat 5/2:** query rewriter + reranker. 4-row comparison table in OBSERVATIONS.md. (THIS WEEKEND)
+3. **Wed 5/7:** chunking iteration based on rewriter+reranker findings.
+4. **Tue 5/6:** architecture decision (vanilla vs graph-RAG vs agentic) informed by Sat results.
+5. **Wk 5/12-5/16:** apply pricer pattern → BBC-tuned embeddings ("speak beer" interpretation #1).
+6. **Wk 5/19-5/23+:** generative LM fine-tune ("speak beer" interpretation #2).
+7. **Wk 5/26+:** agentic RAG layer (tool routing — wiki retrieval / Databricks query / fine-tuned model).
+8. **Q2 (deferred from earlier roadmap):** Azure deployment + Salesforce callout (NGEN-5882/5883 plumbing already proven 5/1; deployment effort ~4-5 days when prioritized).
+9. **Q3:** persona routing (brand-mgr vs sales-rep) + held-out eval harness.
+10. **Q4:** base-vs-tuned model evaluation + stakeholder writeup.
+
+### Track P — Pricer skill build (Ed Donner Wk 6 days 1-5)
+
+Capstone fine-tuning project on a non-BBC dataset. **Skill acquisition for the eventual BBC fine-tune step.** Days 1-5 spread Sat 5/3 → Fri 5/9 (one per day, ~2h each). Wk 6 closes Fri 5/9 ✅. Then Wk 7 (agents) + Wk 8 (capstone) extend through ~5/23.
+
+**No sprint deadline. No demo gate.** Project grows as engineer skills up. Show something cool every ~2 weeks; multi-month arc compounds.
+
+### Where the code lives
+- `~/ai-engineering/sandbox/beer_rag_app/` — Track B
+- `~/llm_engineering/week6/` — Track P (Ed Donner pricer)
+- `~/llm_engineering/week7/`, `week8/` — Track P (agents + capstone, future windows)
 
 ---
 
-## 2. Why this matters (Peter's L-levels advanced)
+## 2. Why this matters (DEPRECATED 2026-05-01 — L-credential framing dropped)
+
+> **Section deprecated per 2026-05-01 user feedback.** AI Stacks L-level credentials (L1→L2 advancement on Microsoft / OpenAI / Anthropic / Google / Ollama) are no longer used as motivators. Real-capability framing replaces this — "deploy a service to Azure," "join Databricks data into RAG," "fine-tune a model that speaks beer." Original L-level table preserved below as historical context only. The L-table in `~/Documents/Obsidian Vault/Notes/BBC Industry Intel Platform.md` Peter Strategy Self-Assessment section remains for Peter check-ins.
+
+**Capability scoreboard (artifacts > credentials) — current framing:**
+- ✅ beer_rag_app pipeline + retrieval metrics shipped
+- ⚪ 4-row comparison (vanilla / +rewrite / +rerank / +both) — Sat 5/2
+- ⚪ First fine-tuned model on disk (pricer) — by Fri 5/9
+- ⚪ Architecture decision (vanilla / graph-RAG / agentic) — Tue 5/6
+- ⚪ BBC-tuned embeddings ("speak beer" #1) — by Fri 5/16
+- ⚪ Generative LM fine-tune ("speak beer" #2) — Wk 5/19-5/23
+- ⚪ Agentic RAG layer (tool routing) — Wk 5/26+
+- ⚪ Azure deploy + SF callout — Q2-Q3 (NGEN-5882/5883 plumbing already proven 5/1)
+- ⚪ Databricks data join — Q3 (after Azure deploy)
+
+<details>
+<summary>Historical L-level table (deprecated)</summary>
 
 | Area | Now | Target | What this sprint contributes |
 |---|---|---|---|
-| **RAG Pipelines** | L2 | L3 | End-to-end retrieval + rerank + query-rewrite + eval harness on BBC data is direct L3 evidence. Biggest single jump in this sprint. |
-| **Using Primitives** (tokens, embeddings, vectors) | L2→L3 | L3 | Chunk boundaries, embedding choice, similarity math, top-K retrieval — all hand-written, no black-box. |
+| **RAG Pipelines** | L2 | L3 | End-to-end retrieval + rerank + query-rewrite + eval harness on BBC data is direct L3 evidence. |
+| **Using Primitives** | L2→L3 | L3 | Chunk boundaries, embedding choice, similarity math, top-K retrieval — all hand-written, no black-box. |
 | **Prompt Engineering** | L2 | L3 | System prompts for QA, rerank ordering, and query rewriting are three distinct structured-output prompts. |
-| **Production Concerns** | L1 | L2 | Module boundaries + eval harness is the *mindset* shift from "notebook" to "service." **Not fully closed** — L2 needs the Week 3 FastAPI+Docker step. |
+| **Production Concerns** | L1 | L2 | Module boundaries + eval harness; full closure needs FastAPI+Docker step (deferred). |
 | **AI Stacks — OpenAI** | L1 | L2 | OpenAI embeddings API + structured outputs + LLM-as-judge all exercised. |
 
-What this sprint does **not** move: Training/Running Models (Q4), AI Stacks — Microsoft (Week 4 Azure), Building Agents (no tool-calling yet — scope discipline).
+</details>
 
 ---
 
@@ -129,10 +392,10 @@ Each day has:
     3. Context formatting: source-tagged, joined with `\n\n`. Picked option 3 from the plan.
     4. `top_k = 10` (slightly above plan's suggestion of 8). Day 2 eval will validate.
   - Smoke-tested: "How can Sam Adams boost sales in 2026" returns coherent answer with relevant chunks; cosine distances 0.63–0.72 (healthy "relevant but varied" spread).
-- [ ] Write `app.py`:
-  - `gr.ChatInterface(answer_question, title="Beer Industry Intel", type="messages").launch(inbrowser=True)` — adapter needed because `answer_question` returns `(str, list)` but Gradio expects `str`.
-- [ ] Run it. Ask ~10 BBC-relevant questions. Note which answers feel obviously wrong. Don't fix anything — write observations in a scratchpad / `OBSERVATIONS.md`.
-- [ ] Cleanup before commit: remove debug `print` on `answer.py` line 35.
+- [x] Write `app.py` (done 2026-04-29):
+  - `chat(message, history)` adapter unpacks the `(str, list)` tuple → returns `str`. `gr.ChatInterface(chat, title="Beer-O-Matic").launch(inbrowser=True)`. Gradio 6.10 dropped the `type` kwarg (messages format is now default).
+- [ ] Run it. Ask ~10 BBC-relevant questions. **DEFERRED** — eval harness numbers will replace eyeball judgments; revisit only if eval surfaces unexplained behavior.
+- [x] Cleanup before commit: remove debug `print` on `answer.py` line 35.
 
 **Day 1 carryover → Saturday:** embeddings + Chroma persistence + `answer.py` + `app.py` all deferred. Friday was a slower-than-budgeted Python ramp-up day (not a concept problem — the AI-engineering reasoning was strong; Python-idiom friction was the cost driver). Saturday will need a small reshuffle: finish Day 1 carryover in the morning, then compress Day 2 (eval harness) into the afternoon.
 
@@ -166,18 +429,21 @@ Each day has:
 **Objective:** `python -m beer_rag_app.evaluation.dashboard` launches a Gradio dashboard that runs retrieval eval + answer eval over a curated test set and shows color-coded MRR/nDCG/keyword-coverage + accuracy/completeness/relevance.
 
 **Tasks:**
-- [ ] Create `evaluation/` package with `__init__.py`.
-- [ ] Write `evaluation/test.py`:
-  - `Test` pydantic model: `question: str, category: str, reference_answer: str, keywords: list[str]`.
-  - `load_tests() -> list[Test]` reading `tests.jsonl`.
-- [ ] Curate `tests.jsonl` with **20–30 test queries about the beer industry + BBC** spread across ≥4 categories (`direct_fact`, `comparative`, `temporal`, `holistic` are the most useful for your corpus). Seed from `sandbox/test.jsonl` if categories match; otherwise write fresh. Categories matter — they let you see **where the pipeline fails**, not just how much.
-- [ ] Write `evaluation/eval.py`:
-  - `evaluate_retrieval(test: Test) -> RetrievalEval` — run the retriever, compute MRR (rank of first chunk containing a keyword), nDCG@10, keyword coverage (% of test's keywords appearing anywhere in top-K).
-  - `evaluate_answer(test: Test) -> AnswerEval` — generate the answer via `answer.answer_question`, send `{question, reference, candidate}` to an LLM judge prompt, parse 1–5 scores for accuracy/completeness/relevance.
-  - Generator variants: `evaluate_all_retrieval() -> Iterator[(Test, RetrievalEval, float)]` yielding progress fractions — same signature as `~/llm_engineering/week5/evaluator.py` so the dashboard port is mechanical.
-- [ ] Write `evaluation/dashboard.py`:
-  - Adapt `~/llm_engineering/week5/evaluator.py`. Change the title, labels, and tests source. Keep the two-button + two-bar-chart layout, color thresholds, and progress bar pattern.
-- [ ] Run both evals. Save numbers to `OBSERVATIONS.md` under "Day 2 baseline".
+- [x] Create `evals/` package with `__init__.py` (named `evals/`, not `evaluation/` per plan — matches existing scaffold; `beer_rag_app/__init__.py` also added so `python -m` works).
+- [x] Write `evals/evaluation.py` — combined Pydantic + metrics file (plan called for split `test.py` + `eval.py`; user chose single file):
+  - `TestQuestion` Pydantic model: `question, keywords, reference_answer, category`.
+  - `load_tests() -> list[TestQuestion]` reading `tests.jsonl` (named `test.jsonl` at package root).
+- [x] `tests.jsonl` — 100 queries from `sandbox/test.jsonl` moved to `beer_rag_app/test.jsonl`. Categories: `direct_fact`, `entity`, `comparative`, `temporal`, `spanning`, `regulatory`. Plan asked 20–30; kept all 100 (data-rich = no curation work; runtime cost manageable for retrieval-only eval). Filter later if LLM-judge runtime hurts.
+- [x] Retrieval metric helpers written and smoke-tested on golden case (1.0/1.0/1.0):
+  - `keyword_coverage(keywords, retrieved_docs)` — fraction of keywords found anywhere in top-K (case-insensitive).
+  - `reciprocal_rank(keyword, retrieved_docs)` — `1/rank` of first match. `mrr(keywords, retrieved_docs)` aggregates avg.
+  - `calculate_dcg`, `calculate_ndcg(keyword, retrieved_docs, k=10)` (binary relevance, copied from Ed Donner). `ndcg(keywords, retrieved_docs, k=10)` aggregates avg.
+  - Stress test confirmed metric divergence: 2-doc list with keyword in doc 2 → coverage=1.0, mrr=0.5.
+- [ ] Write `evaluate_retrieval(test) -> dict` — orchestrator: one `fetch_content` call, run all three metrics on the result. (Day 2 finish.)
+- [ ] Run baseline: loop over all 100 tests, aggregate per-category, save to `OBSERVATIONS.md` under "Day 2 baseline".
+- [ ] **Slipped to Thursday 2026-04-30:** `evaluate_answer(test)` (LLM-as-judge: accuracy/completeness/relevance) + `evaluate_all_*` generator variants + `dashboard.py` Gradio port from `~/llm_engineering/week5/evaluator.py`.
+
+**Pre-baseline blocker:** `answer.py:11` currently set to `OPEN_AI_MODEL = "gpt-5.5"` (not a real model). Revert to `"gpt-4.1-nano"` before running `evaluate_retrieval` — first call will 400 otherwise.
 
 **Deliverable:** `OBSERVATIONS.md` contains **a baseline metrics table** with MRR, nDCG, keyword coverage, and average accuracy/completeness/relevance — plus one paragraph on which category performs worst and a hypothesis why.
 
@@ -247,25 +513,37 @@ Each day has:
 
 ---
 
-## 6. After the sprint — where this hands off
+## 6. After this 2-week window — where this hands off
 
-This sprint closes the **Week 2 roadmap milestone** (basic-mode RAG + eval baseline). ~~Week 3 (4/28–5/4)~~ **Week 3 (Thu 4/30–Sun 5/4, 5 days)** picks up with:
-- **Day 3 carryover (descoped from this sprint):** LLM-driven chunking, reranking, query rewriting, ablations. Lands first in Week 3 — the basic-mode service + clean baseline anchor it.
-- **FastAPI wrapper** around `answer.answer_question` exposing a `/query` POST endpoint.
-- **Dockerfile** containerizing the service + Chroma.
-- DataQuest Part 4 (FastAPI + Docker) as the conceptual track.
+This window (5/2 → 5/9) closes:
+- **Beer Intel:** baseline numbers + rewriter + reranker + 4-row comparison + architecture decision + chunking iteration + dataset schema for embedding fine-tune.
+- **Pricer:** Wk 6 days 1-4 done; day 5 done OR carrying.
+- **Reading:** Chip Huyen Ch 6, 7 ✅; Ch 8 ✅ or 🟢.
 
-**If Wednesday ends without basic mode + a Day 2 baseline, Week 3 slips further.** FastAPI is supposed to wrap *a working evaluated module*, not a mid-build one. Week 3 is now 2 days shorter than originally planned **and** absorbs the Day 3 pro-techniques work — total Week 3 load is dense; flag early if it won't fit and reshape, don't pretend.
+### Next window (5/12 → 5/16) — apply pricer to BBC
 
-**What explicitly does NOT go in this sprint (scope discipline):**
-- No FastAPI (Week 3).
-- No Docker (Week 3).
-- No Azure (Week 4).
-- No tool-calling / agents (beyond this 30-day window).
-- No Databricks data join (Q2 milestone).
-- No fine-tuning (Q4 milestone).
+- **Track B:** First BBC-tuned embeddings. Apply pricer day-2 dataset patterns + Ch 8 dataset engineering principles. Pull wiki corpus, format as training pairs, run embedding fine-tune. Swap into `beer_rag_app/answer.py` `fetch_content`. Re-run baseline → measure tuned-vs-base retrieval delta. Cool demo target ~5/16: "BBC-tuned embeddings retrieval comparison."
+- **Track P:** Pricer Wk 6 day 5 close (if not Fri 5/9). Begin Wk 7 (agents) reading.
 
-If any of those feel tempting mid-sprint, write them into `OBSERVATIONS.md` under "Deferred ideas" and move on.
+### Following windows (5/19+) — multi-month arc
+
+| Window | Track B (Beer Intel) | Track P (skill) |
+|---|---|---|
+| 5/19-5/23 | Generative LM fine-tune ("speaks beer" #2) | Ed Donner Wk 7 agents |
+| 5/26-5/30 | Agentic RAG layer + tool routing | Ed Donner Wk 8 capstone |
+| Jun-Jul | Azure hosting + Salesforce callout (NGEN plumbing exists) | Next agents course |
+| Q3 | Persona routing + Databricks data join | — |
+| Q4 | Base-vs-tuned eval + stakeholder writeup | — |
+
+### What explicitly does NOT go in this 2-week window (scope discipline)
+
+- No FastAPI / Docker / Azure deploy. (Defer to later windows when pricer track stable. Q2 RAG-on-Azure milestone explicitly slipped per 5/1 pivot.)
+- No LLM-driven chunking. (Would require re-ingest into separate `beer_rag_pro` Chroma collection — too large for current windows.)
+- No LLM-judge `evaluate_answer` (Day 2 stretch). (Defer.)
+- No Databricks data join (Q3 milestone — needs Azure deploy first).
+- No Salesforce callout integration (Q3+ — the plumbing exists from NGEN-5882/5883 but the agent must be deployed first).
+
+If any of those feel tempting mid-window, write them into `OBSERVATIONS.md` under "Deferred ideas" and move on. The discipline is: each window adds one capability layer, doesn't try to skip ahead.
 
 ---
 
@@ -347,16 +625,199 @@ That is **3+ days of work in one ~2–3 hr session**. Not realistic. Three hones
 
 Push back on this if you read it differently — e.g., if the L3 evidence on pro techniques is a higher priority than I'm weighting it.
 
-### Wed 2026-04-29 — Day 2 (eval harness + baseline). Day 3 (pro mode) descoped to Week 3.
-- Start time:
-- End time:
-- **Scope this session** (~2–3 hrs): close Day 1 carryover (`app.py` + 10 BBC questions + `OBSERVATIONS.md` Day 1 impressions + `answer.py` line-35 cleanup) → start Day 2 eval harness. If full Day 2 doesn't fit (likely), at minimum land `tests.jsonl` + retrieval eval (`MRR`, `nDCG`, `keyword coverage`); LLM-judge answer eval can slip to Thursday before Week 3 starts.
-- Day 2 baseline: MRR=___ nDCG=___ coverage=___% · acc=___/5 comp=___/5 rel=___/5
-- Worst category + hypothesis:
-- Commit SHA:
+### Wed 2026-04-29 — Day 1 closed; Day 2 retrieval metrics written; baseline + LLM-judge + dashboard slip to Thursday
+- Start time: ~late afternoon
+- End time: ~evening (faded out — user flagged fatigue mid-session)
+- Blocks completed:
+  - `app.py` — Gradio chat wired through `answer_question`. Fixed two bugs live: returned tuple instead of unpacked str (Gradio rendered weird); passed `type="messages"` (Gradio 6.10 dropped that kwarg, messages format is now default).
+  - `evals/` package + `beer_rag_app/__init__.py` to make `python -m` launches work.
+  - `evals/evaluation.py` (combined Pydantic + metrics file): `TestQuestion`, `load_tests`, `keyword_coverage`, `reciprocal_rank`, `mrr`, `calculate_dcg`, `calculate_ndcg`, `ndcg` aggregator. All three metrics smoke-tested 1.0/1.0/1.0 on golden-case (keyword-bearing reference answer as the only chunk). Stress test confirmed coverage vs. mrr divergence with a 2-doc decoy case (1.0 vs 0.5).
+  - `tests.jsonl` (100 queries) moved into `beer_rag_app/`. Loader resolves it via `__file__.parent.parent`.
+  - Cleanup: removed debug `print` on `answer.py:35`.
+- Blocks NOT completed (slipping to Thursday 2026-04-30):
+  - `evaluate_retrieval(test) -> dict` orchestrator (the actual loop that calls `fetch_content` + runs all three metrics).
+  - **Run the baseline**: 100 tests through retrieval eval, per-category aggregation, `OBSERVATIONS.md` "Day 2 baseline" table.
+  - LLM-judge `evaluate_answer` + `evaluate_all_*` generators.
+  - `dashboard.py` Gradio port.
+  - 10 BBC vibe-check questions + `OBSERVATIONS.md` Day 1 impressions section (deferred — eval will replace eyeballing if it produces clean signal).
+- Pre-baseline blocker: `answer.py:11` set to `OPEN_AI_MODEL = "gpt-5.5"` (non-existent). Revert to `"gpt-4.1-nano"` before Thursday's first eval run.
+- What worked:
+  - **Architectural redirect on metric signature** — user's first draft of `keyword_coverage(keywords, top_k=5)` couldn't work (no chunks to scan). Surfaced the retrieve-once / score-many architecture explicitly. Each metric is now stateless and unit-testable against hand-built `Result` lists with no Chroma.
+  - **Iterative bug-fix cadence** — keyword_coverage v1 had four bugs (inverted formula, double-count, case-sensitive, wrong type). Walked through all four in one review, user fixed in one pass, smoke test confirmed correctness next iteration. MRR landed clean on first try.
+  - **Stress test caught the conceptual point** — 2-doc decoy showed coverage stays 1.0 while MRR halves. Made the metric semantics tangible: coverage = reach, mrr = ranking.
+  - **Library-version archaeology** — `inspect.signature(gr.ChatInterface.__init__)` to confirm Gradio 6 dropped `type` kwarg in 30 seconds. Faster than docs, never wrong about the installed version.
+- What got stuck:
+  - **Wall-of-text feedback** — early in session, multi-decision menus + parallel insight blocks made it hard to track the next step. User flagged it; saved to memory (`feedback_response_length.md`) — keep one decision per turn going forward.
+  - **Method-vs-call typo** — `doc.page_content.lower` (missing parens) inside a generator — easy to miss because no syntax error, fails only at iteration with a confusing `TypeError: argument of type 'method' is not iterable`. Worth banking as a Python idiom watch.
+  - **Smoke-test arg shape** — user passed full `keywords` list to per-keyword `calculate_ndcg`; needed the aggregator first. Reinforced: per-keyword helpers + per-test aggregators are different layers.
+- Concepts driven home today:
+  - **Retrieval-once + stateless metrics** — design pattern for any eval harness, not just RAG. Metrics that pull their own data are 3× more expensive and not unit-testable.
+  - **Coverage vs MRR as orthogonal signals** — one tells you the retriever can reach relevant material; the other tells you it ranks relevant material near the top. Both can be high; both can be low; they diverge when ranking is bad relative to recall. Different fixes.
+  - **nDCG IDCG with binary relevance** = "what's the best rearrangement of what was actually found" — sorting the actual relevances descending = all 1's at top. Returns 0.0 if nothing found (the guard).
+- Commit SHA: (pending)
 
-### Day 3 — pro mode + ablations — **DESCOPED to Week 3 carryover**
-Originally scheduled for Wed 2026-04-29; now lands in Week 3 between FastAPI and Docker if Week 2 closes clean. Rationale: Day 3 is a measured-improvement exercise that needs a working basic pipeline + clean baseline as its anchor. Forcing it into one ~2.5hr Wednesday session would compromise both the baseline and the pro-mode comparison. Better to land basic + honest numbers cleanly, then layer pro techniques onto a deployed FastAPI service in Week 3 where they have a service to attach to. Tasks (LLM-driven chunking, reranking, query rewriting, ablations) preserved verbatim in section 5 above for the Week 3 pickup.
+### Day 3 — pro mode + ablations — **PARTIALLY RESCOPED — rewriter + reranker land Saturday 2026-05-02**
+Originally scheduled for Wed 2026-04-29; first rescoped to Week 3 carryover; now Saturday 5/2 absorbs the rewriter + reranker portion as a concentrated Beer Intel sprint day (per 2026-05-01 pivot — pricer track Track P parallel-builds, Beer Intel Track B continues with quality improvements). LLM-driven chunking still deferred (would require re-ingest into a separate `beer_rag_pro` collection — not Saturday-sized work). Ablations land Wednesday 5/7 evening as chunking iteration informed by Saturday's 4-row comparison.
+
+### Thu 2026-04-30 — Day 2 baseline aggregator + real smoke shipped
+- Start time: ~late afternoon
+- End time: ~evening
+- Blocks completed:
+  - Replaced fake `__main__` smoke in `evals/evaluation.py` with real `fetch_content(test.question)` call. Smoke now validates the full retrieval path, not a tautology.
+  - Reverted `OPEN_AI_MODEL` to `"gpt-4.1-nano"` (was "gpt-5.5", non-existent).
+  - Wrote `evaluate_retrieval(test, k=10)` orchestrator + `run_baseline()` per-category aggregator per the assistant-suggested shape from Wed review notes.
+  - `app.py` Gradio module verified launching against persisted Chroma.
+- Blocks NOT completed (slipping to Sat 5/2):
+  - **The actual run.** `run_baseline()` exists; never executed against full 100 tests. No numbers in `OBSERVATIONS.md` yet.
+  - LLM-judge `evaluate_answer` + `dashboard.py` Gradio port — still pending (Day 2 stretch).
+- What worked:
+  - Wed review notes were directly actionable; Thursday work was largely "execute the plan" rather than re-deciding.
+  - Stateless metric design from Wed paid off — building the orchestrator was a thin loop, not a redesign.
+- What got stuck:
+  - Time pressure ate the actual run. Code was ready; running 100 tests + writing observations needed another 30-45 min that evening didn't have.
+- Commit SHA: `c59cd87` (last carryover commit visible in 2-week git log).
+
+### Fri 2026-05-01 — No work session; cyber alerts ate the day
+- Start time: N/A
+- End time: N/A
+- Blocks completed: zero. Day eaten by cybersecurity false-alarm alert triage. All 3 meetings (weekly connect, Customer Sets, April Roundup) held. Wiki system updates shipped on the side (knowledge codification — counts as Goal 3, not formal sprint progress).
+- **Sprint pair status correction:** NGEN-5882/5883 round-trip POC end-to-end proven — Salesforce → Databricks (via Azure Function) → Salesforce. Connected App built. Flight logs at `~/.claude/flight-logs/NGEN-588[2,3].md` were stale at session start; pricer/RAG architectural reasoning now factors this as DONE.
+- **Plan revision happened in evening session 5/1:** Two-track parallel structure formalized. Pricer prioritized for skill acquisition; Beer Intel ongoing for business value. Multi-month arc (Wk 6 → Wk 7 → Wk 8 → next agents course) → mapped onto BBC IIP north star (deploy + Databricks join + agentic loop). User explicitly: "I am not worried if DW numbers seem shallow. I consider study a form of deep work" given AI Capability Center role. AI Stacks L-credential framing deprioritized; real-capability framing only.
+- Commit SHA: N/A
+
+### Sat 2026-05-02 — BEER INTEL SPRINT DAY (planned ~4h)
+**Track B sprint day. Pricer paused; Sunday picks up.**
+- Block 1 (60 min): Vanilla baseline run. `python -m beer_rag_app.evals.evaluation` `run_baseline()` against persisted Chroma + 100-test set. Capture per-category MRR / nDCG / keyword_coverage as "Vanilla" row in `OBSERVATIONS.md`. **Pre-flight:** confirm `OPEN_AI_MODEL = "gpt-4.1-nano"` in answer.py before running.
+- [10-min break]
+- Block 2 (75 min): Add query rewriter to `answer.py`. Pick (a) HyDE — single LLM call generates hypothetical answer, embed THAT instead of question; OR (b) multi-query — LLM expands into 2-3 variants, retrieve all, dedupe. Recommend HyDE first (simpler). Re-run `run_baseline()` → "+ Rewrite" row.
+- [10-min break]
+- Block 3 (90 min): Add reranker to `answer.py`. Pick (a) Cohere Rerank API — `pip install cohere`, ~$1/1000 queries, ~5 lines code; OR (b) `BAAI/bge-reranker-base` — HuggingFace cross-encoder, free, slower, requires sentence-transformers. Recommend Cohere first for sprint speed; can swap later. Take top-20 from vector search → rerank → top-5 to LLM. Re-run baselines → "+ Rerank" + "+ Rewrite + Rerank" rows.
+- **Deliverable:** `OBSERVATIONS.md` 4-row comparison table (Vanilla / +Rewrite / +Rerank / +Both) per category + 1 paragraph identifying winning combo and where it fails. The "where it fails" paragraph is the input to Tuesday's architecture decision (vanilla vs graph-RAG vs agentic).
+- **Skip if running long:** the LLM-judge / dashboard / chunking iteration. Those land later in window.
+
+### Sun 2026-05-03 — PRICER + READING DAY (planned ~4h)
+**Track P opens. Track B in reading mode.**
+- Block 1 (135 min) [P]: Ed Donner Wk 6 Day 1 — `~/llm_engineering/week6/day1.ipynb` end-to-end. BUILD mode: run every cell, modify one thing, understand what pricer is solving (regression vs classification for price prediction? Synthetic data shape?). Deliverable: 3-line vault note on pricer mechanics.
+- [15-min break]
+- Block 2 (90 min) [P/B]: Chip Huyen Ch 7 Finetuning. Read; pairs both pricer mechanics AND BBC embedding/generative tune planning. Deliverable: 2-sentence note on PEFT vs full fine-tune.
+- [15-min break]
+- Block 3 (30 min) [B]: Chip Huyen Ch 6 RAG and Agents — close out chapter. Vocabulary for Tuesday's architecture decision.
+
+### Mon 2026-05-05 — PRICER DAY 2 (home, ~2h) [P]
+Ed Donner Wk 6 Day 2 — synthetic data + dataset shaping cells. Cascaded from Sun (Beer Intel sprint took Saturday, push pricer day2 to Monday). Note overlap with existing `~/ai-engineering/sandbox/synthetic_data_generator.ipynb` for BBC fine-tune dataset prep later.
+
+### Tue 2026-05-06 — ARCH RESEARCH + PRICER DAY 3 (Boston, ~2h)
+- Train (60 min) [B]: Beer Intel architecture research. Read 1 source on graph-RAG (Microsoft GraphRAG paper or blog) OR agentic RAG (LlamaIndex blog) — informed by Saturday's "+ Rewrite + Rerank" failure cases. If multi-hop queries broke, lean graph-RAG. If query routing seems missing, lean agentic. 1-page vault note on architecture choice + rationale.
+- Eve (60 min) [P]: Ed Donner Wk 6 Day 3 — pricer fine-tune trial. First fine-tuned model artifact on disk.
+
+### Wed 2026-05-07 — CHIP HUYEN CH 8 + BEER INTEL CHUNKING (Boston, ~2h)
+- Train (60 min) [R]: Chip Huyen Ch 8 Dataset Engineering — direct prep for BBC embedding fine-tune dataset.
+- Eve (60 min) [B]: Beer Intel chunking iteration. Use Saturday findings: if reranker masked weak retrieval, try smaller chunks. If rewriter helped multi-word queries, try metadata filtering on entity hits. Code change committed; re-run baseline subset.
+
+### Thu 2026-05-08 — DATASET SCHEMA + PRICER DAY 4 (Boston, ~2h)
+- Train (60 min) [R]: Chip Huyen Ch 8 finish + sketch BBC fine-tune dataset format (jsonl shape derived from pricer day2 patterns). Dataset schema decision documented.
+- Eve (60 min) [P]: Ed Donner Wk 6 Day 4 — pricer eval/inference. Base vs fine-tuned comparison numbers on pricer test set.
+
+### Fri 2026-05-09 — PRICER WK6 CLOSE OR BBC EMBED SCAFFOLD (home, ~2h) [P/B]
+Pricer Day 5 wrap (`results.ipynb` if that's where day5 lives) → Wk 6 ✅. If day5 stalls or already done, start BBC embedding fine-tune scaffold: pull wiki corpus, format as training pairs, apply Ch 8 + pricer day2 patterns. Output: pricer Wk 6 closed OR `beer_embed_finetune.py` scaffolded.
+
+---
+
+## Thursday 2026-04-30 — Eval Harness Review Notes (assistant-authored 2026-04-29 EOD)
+
+End-of-Wednesday review of `sandbox/beer_rag_app/evals/evaluation.py` + `answer.py` + `app.py`. Pickup work for Thursday's Day 2 close.
+
+### Critical bug — fix first
+
+**The `__main__` smoke test in `evals/evaluation.py` is fake.** It builds `docs = [Result(page_content=test.reference_answer, metadata={})]` — putting the reference answer INTO a doc, then asking "do keywords appear in this doc?" Of course they do. Coverage will always return 1.0 on this smoke. **The retriever is never called.** The smoke proves nothing about the actual pipeline.
+
+Fix:
+```python
+from beer_rag_app.answer import fetch_content  # adjust to match import style chosen below
+docs = fetch_content(test.question)  # real retrieval against persisted Chroma
+```
+
+Without this, today's metric correctness verification is a tautology. Spend 15 min Thursday morning replacing the fake smoke with a real one before doing anything else on the eval harness.
+
+### Pre-baseline blocker (already flagged in Wed log)
+
+`answer.py:11` is set to `OPEN_AI_MODEL = "gpt-5.5"` (not a real model). Revert to `"gpt-4.1-nano"` before the first `evaluate_retrieval` run — first call will 400 otherwise.
+
+### Naming / shape concerns (worth flagging in code comments, not blocking)
+
+1. **`mrr` is keyword-MRR, not query-MRR.** Standard MRR averages reciprocal rank across **queries** (one rank per query). Current `mrr` averages across **keywords** within one query. It's a reasonable custom metric but doesn't match literature MRR. Either rename to `keyword_mrr` / `avg_first_keyword_rank`, or leave the name and add a 2-line docstring stating "this aggregates per-keyword reciprocal ranks within a single query, not per-query MRR across the test set."
+
+2. **`ndcg` aggregates per-keyword nDCG then averages.** Same shape concern — standard nDCG uses a single relevance vector per query. Two cleaner alternatives:
+   - Binary OR: `relevance[i] = 1 if any(kw in chunk[i]) else 0`, then standard nDCG.
+   - Graded: `relevance[i] = count of matching keywords`, then standard nDCG.
+   Either gives query-level nDCG matching literature. Current per-keyword averaging is acceptable for v0.1 but flag it before publishing numbers anyone will quote.
+
+### Code-hygiene fixes (cheap wins)
+
+3. **Import path mismatch.** `evaluation.py` uses `from sandbox.beer_rag_app.ingest import Result` (absolute from repo root). `answer.py` uses `from ingest import Result` (relative-style). Will break depending on cwd. Pick one shape and apply consistently. Recommend: `from beer_rag_app.ingest import Result` everywhere, run from `sandbox/` with `python -m beer_rag_app.evals.evaluation`.
+
+4. **Mutable default arg in `answer.py`:** `def answer_question(question, history=[])`. Classic Python footgun — list shared across all calls without an explicit override. Fix:
+   ```python
+   def answer_question(question, history=None):
+       if history is None:
+           history = []
+   ```
+
+5. **Unused imports in `answer.py`:** `tenacity` (`retry`, `wait_exponential`), `litellm.completion`, `BaseModel`, `Field`, `Path`. Strip or wire them up. Either option is fine; just don't leave dead imports.
+
+6. **Smoke test seeds `metadata={}` but `make_rag_messages` requires `metadata['source']`.** Different code paths so not currently breaking, but inconsistent. Once smoke uses real `fetch_content`, this resolves naturally.
+
+### Missing piece — aggregating runner
+
+The metric helpers exist; the harness top doesn't. Plan-of-record `evaluate_retrieval(test) -> dict` was the next task. Suggested shape:
+
+```python
+def evaluate_retrieval(test: TestQuestion, k: int = 10) -> dict:
+    docs = fetch_content(test.question)
+    return {
+        "question": test.question,
+        "category": test.category,
+        "coverage": keyword_coverage(test.keywords, docs),
+        "mrr": mrr(test.keywords, docs),
+        "ndcg": ndcg(test.keywords, docs, k=k),
+    }
+
+
+def run_baseline():
+    tests = load_tests()
+    rows = [evaluate_retrieval(t) for t in tests]
+    # aggregate per-category
+    from collections import defaultdict
+    by_cat = defaultdict(list)
+    for r in rows:
+        by_cat[r["category"]].append(r)
+    for cat, group in by_cat.items():
+        avg_cov = sum(r["coverage"] for r in group) / len(group)
+        avg_mrr = sum(r["mrr"] for r in group) / len(group)
+        avg_ndcg = sum(r["ndcg"] for r in group) / len(group)
+        print(f"{cat:15} n={len(group):3} cov={avg_cov:.3f} mrr={avg_mrr:.3f} ndcg={avg_ndcg:.3f}")
+    return rows
+```
+
+That's the deliverable that closes Day 2 retrieval baseline. Save the printed table into `OBSERVATIONS.md` under "Day 2 baseline" with date stamp.
+
+### Strong design choices to preserve
+
+- **Categorizing test questions** (`direct_fact`, `entity`, `comparative`, `temporal`, `spanning`, `regulatory`) is gold for Q3 persona-routing. Per-category metric breakdowns will surface where retrieval breaks (spanning likely worse than direct_fact). Don't lose this dimension.
+- **Stateless metric helpers** (run on caller-provided `list[Result]`) is the right factoring. Keeps unit-testable; keeps the loop that calls retrieval separate from the loop that scores. Preserve this even when adding LLM-judge — `evaluate_answer(test, retrieved_docs, generated_answer)` should also be stateless.
+- **Pydantic `TestQuestion` + JSONL on disk** is the right test schema shape. Fast to load, easy to git-diff, easy to extend (just add a field, old rows still parse if field is `Optional`).
+
+### Suggested Thursday block sequence (~2-3 hr)
+
+1. **Pre-baseline triage (15 min):** revert `OPEN_AI_MODEL` to `"gpt-4.1-nano"`. Fix import path mismatch (pick package-relative everywhere). Fix mutable default `history=[]`. Strip unused imports.
+2. **Real smoke test (15 min):** rewrite `evals/evaluation.py` `__main__` to call `fetch_content(test.question)` instead of fabricating a doc from `reference_answer`. Verify metrics produce sensible non-tautological numbers on test 0.
+3. **Aggregating runner (45-60 min):** write `evaluate_retrieval(test)` + `run_baseline()` per the shape above. Run it. Capture the per-category table.
+4. **Write `OBSERVATIONS.md` Day 2 baseline section (30 min):** one paragraph on which category performs worst + a hypothesis why. Three-decimal precision on the metrics. Note the worst-performing category as the candidate for Day 3 pro-technique testing.
+5. **Stretch — `evaluate_answer` LLM-judge skeleton (30-45 min):** if time remains. Pydantic `JudgeScore { accuracy, completeness, relevance }` + judge prompt + `evaluate_answer(test, retrieved_docs, generated_answer) -> JudgeScore`. Don't run on all 100 tests yet — wire it through one test as a smoke; full LLM-judge baseline is a bigger budget conversation.
+
+### Open question for Thursday's Brooks
+
+Plan §6 calls for FastAPI to wrap "a working evaluated module." Day 2 baseline is the *evaluated* part. Once retrieval baseline is in `OBSERVATIONS.md`, the FastAPI wrapper can start in parallel with Day 3 pro-techniques rather than after — they touch different files. Worth considering when planning Friday/weekend allocation.
 
 ---
 
