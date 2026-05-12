@@ -102,39 +102,137 @@ User wants SF connected sooner. Originally tools first → FastAPI → deploy �
 
 User has **Contributor** on `BBC-ITBS-POC-EastUS`, verified 2026-05-08.
 
-## Wed 5/13 — first 30 min of work
+## Wed 5/13 — runbook (sequenced, copy-pasteable)
+
+Confirmed Tue 5/12 EOD: **no Container Apps environment exists yet** in `BBC-ITBS-POC-EastUS`. The environment is a prereq for the Container App — create it first.
 
 ```bash
-# 1. Verify state from Tue 5/12 EOD
+SUB=cebd9dd6-bc18-4e1c-9564-bd4ec13c565b
+RG=BBC-ITBS-POC-EastUS
+ACA_ENV=soto-agent-env
+ACA_NAME=soto-agent
+ACR=bbcsotoacr
+REGION=eastus
+```
+
+### Step 0 — verify state from yesterday
+
+```bash
 cd ~/ai-engineering
-git log --oneline -6   # should show 3 fresh commits ending at 498edc7 "Dockerfile + slim requirements; first ACR image pushed"
-az acr repository show-tags --subscription cebd9dd6-bc18-4e1c-9564-bd4ec13c565b -n bbcsotoacr --repository soto-agent -o table  # should show 'latest'
+git log --oneline -8                                   # last commit should be the CONTEXT refresh
+az account show --query name -o tsv                    # "BBC DevTest Subscription"
+az acr repository show-tags --subscription $SUB -n $ACR --repository soto-agent -o table   # should show 'latest'
+az containerapp env list --subscription $SUB -g $RG -o table  # confirm: no rows (env not yet created)
+```
 
-# 2. Add /health endpoint to soto_agent/server.py — Container App startup/liveness probes need it.
-#    Minimal: @app.get("/health") -> {"status": "ok"}.
-#    Then make image to push an updated tag.
+### Step 1 — add `/health` endpoint to `soto_agent/server.py`
 
-# 3. Create the Container App. Sketch:
+Required for Container Apps startup/liveness probes. Smallest version:
+
+```python
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+```
+
+Rebuild + push:
+
+```bash
+make -C soto_agent image
+```
+
+### Step 2 — create Container Apps environment (one-time, ~3 min)
+
+`--logs-destination none` skips Log Analytics (cheaper for the demo; can be wired in later).
+
+```bash
+az extension add --name containerapp --upgrade
+az provider register --namespace Microsoft.App
+az provider register --namespace Microsoft.OperationalInsights
+
+az containerapp env create \
+  --subscription $SUB \
+  --resource-group $RG \
+  --name $ACA_ENV \
+  --location $REGION \
+  --logs-destination none
+```
+
+### Step 3 — create the Container App
+
+The agent reads `AZURE_OPENAI_API_KEY` from env, so it must be a **secret**, not plain text. Other env vars are non-sensitive (endpoints, deployment names).
+
+Values (from local `.env`, set fresh on Wed):
+- `AZURE_OPENAI_API_KEY` — Foundry-ITBS-POC-2 key (the secret)
+- `AZURE_OPENAI_ENDPOINT` — `https://foundry-itbs-poc-2.cognitiveservices.azure.com/`
+- `AZURE_OPENAI_API_VERSION` — `2024-12-01-preview`
+- `AZURE_OPENAI_DEPLOYMENT_CHAT` — `gpt-4.1-mini`
+- `AZ_GPT_FOUR_ONE` — `gpt-4.1` deployment name (whatever you typed at deploy time)
+- `SOTO_MODEL` — `gpt-4.1` (so the agent uses the larger model by default)
+
+Other env vars from `.env` (`AZ_DEEPSEEK_*`, `AZ_EMBEDDING_*`, `AZ_TEXT_EMBEDDING_3_SMALL_KEY`) are **not needed in v1** — only used by code paths we're not running in the container.
+
+```bash
+# Read the key locally so it never lands in shell history as a literal
+AOAI_KEY=$(grep '^AZURE_OPENAI_API_KEY=' .env | cut -d'=' -f2-)
+
 az containerapp create \
-  --subscription cebd9dd6-bc18-4e1c-9564-bd4ec13c565b \
-  --resource-group BBC-ITBS-POC-EastUS \
-  --name soto-agent \
-  --image bbcsotoacr.azurecr.io/soto-agent:latest \
-  --ingress external --target-port 8000 \
-  --registry-server bbcsotoacr.azurecr.io \
-  --secrets azure-openai-api-key=<paste> \
+  --subscription $SUB \
+  --resource-group $RG \
+  --name $ACA_NAME \
+  --environment $ACA_ENV \
+  --image $ACR.azurecr.io/soto-agent:latest \
+  --registry-server $ACR.azurecr.io \
+  --registry-identity system \
+  --ingress external \
+  --target-port 8000 \
+  --min-replicas 0 \
+  --max-replicas 1 \
+  --cpu 0.5 --memory 1.0Gi \
+  --secrets azure-openai-api-key="$AOAI_KEY" \
   --env-vars \
+      AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
       AZURE_OPENAI_ENDPOINT=https://foundry-itbs-poc-2.cognitiveservices.azure.com/ \
       AZURE_OPENAI_API_VERSION=2024-12-01-preview \
       AZURE_OPENAI_DEPLOYMENT_CHAT=gpt-4.1-mini \
-      AZ_GPT_FOUR_ONE=<deployment name> \
-      SOTO_MODEL=gpt-4.1 \
-      AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key
-
-# 4. Smoke curl against the FQDN that az returns.
+      AZ_GPT_FOUR_ONE=gpt-4.1 \
+      SOTO_MODEL=gpt-4.1
 ```
 
-Then: step 7 — Named Credential URL swap on the SF side.
+`--registry-identity system` tells Container Apps to use its own system-assigned managed identity to pull from ACR. After `create` runs, attach AcrPull:
+
+```bash
+ACA_PRINCIPAL=$(az containerapp show --subscription $SUB -g $RG -n $ACA_NAME --query identity.principalId -o tsv)
+ACR_ID=$(az acr show --subscription $SUB -n $ACR --query id -o tsv)
+az role assignment create --assignee $ACA_PRINCIPAL --role AcrPull --scope $ACR_ID
+```
+
+(If the ACR pull fails on first create because the role wasn't yet assigned, restart the revision with `az containerapp revision restart` or just `az containerapp update --image` after the role is in place.)
+
+### Step 4 — smoke test against the FQDN
+
+```bash
+FQDN=$(az containerapp show --subscription $SUB -g $RG -n $ACA_NAME --query properties.configuration.ingress.fqdn -o tsv)
+echo "https://$FQDN/health"
+curl -s https://$FQDN/health
+curl -s -X POST https://$FQDN/soto-agent \
+     -H "Content-Type: application/json" \
+     -d '{"question":"What is a Wholesaler Program?"}'
+```
+
+If anything looks off, tail the logs:
+
+```bash
+az containerapp logs show --subscription $SUB -g $RG -n $ACA_NAME --follow
+```
+
+### Step 5 — SF Named Credential URL swap (step 7 of the build plan)
+
+Once the FQDN is reachable and the smoke test answers cleanly:
+- Open the existing `Azure_Account_Intelligence_EC` Named Credential in the target SF org.
+- Replace the URL with `https://$FQDN` (no path — Apex builds the path).
+- Apex `AccountIntelligenceController` continues to call the same Named Credential; only the URL behind it moves.
+- Click "Ask AI" from the `accountIntelligence` LWC. Expect wiki + glossary answers (databricks/SF tools aren't wired yet — they ship Thu-Fri).
 
 Earlier-session runbook (Mon 5/11 — preserved for reference, not the active path):
 
