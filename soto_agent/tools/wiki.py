@@ -21,8 +21,19 @@ SELECT_PAGES_SYSTEM_PROMPT = """
 You are an expert Sales Analyst in the beer and beyond-beer industry.
 Given a user question and a wiki index, return the relative paths of up to 8
 pages from the index that are most likely to help answer the question.
-Return paths exactly as they appear in the index. If nothing is relevant,
-return an empty list.
+
+PATH RULES — read carefully, deviations break downstream tools:
+- Use the page reference EXACTLY as it appears between [[ ]] in the index.
+- If the index shows [[Matt Withington]], return "Matt Withington" — no folder prefix.
+- If the index shows [[sources/CBD 2026-04-24 Foo]], return "sources/CBD 2026-04-24 Foo".
+- Do NOT invent folder prefixes. Words like "Entities", "Concepts", "Sources",
+  "Connections", "Analyses" appear in the stats table at the top of the index as
+  CATEGORY COUNTS — they are not folder names. Only "sources/", "analyses/",
+  "connections/", "ADRs/", "Domains/", "Calmatic/", "Presentations/" are real
+  folder prefixes, and only when an index entry already includes them.
+- Do NOT strip a folder prefix that the index includes.
+
+If nothing in the index is relevant, return an empty list.
 """
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]")
@@ -46,7 +57,12 @@ def _resolve_page_path(name: str) -> Path | None:
     name = name.removesuffix(".md")
     if "/" in name:
         candidate = VAULT_PATH / f"{name}.md"
-        return candidate if candidate.is_file() else None
+        if candidate.is_file():
+            return candidate
+        # Selector occasionally hallucinates a folder prefix (e.g., "Entities/X"
+        # for a root-level page X). Fall back to a basename rglob so a wrong
+        # prefix doesn't mask an otherwise-resolvable page.
+        return next(VAULT_PATH.rglob(f"{Path(name).name}.md"), None)
     return next(VAULT_PATH.rglob(f"{name}.md"), None)
 
 

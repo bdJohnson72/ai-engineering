@@ -17,11 +17,13 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Callable
+from pydantic import BaseModel
 
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
 
 from soto_agent.tools.wiki import WikiPage, wiki_read, wiki_search
+from soto_agent.tools.glossary_lookup import glossary_lookup, GlossaryEntry
 
 load_dotenv()
 
@@ -188,17 +190,44 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name" : "glossary_lookup",
+            "description": (
+                "Read glossary of business specific terminology to uncover meaning of words that might be ambgious or "
+                "have different meaning in business context. Use this to help shape exploration of the wiki or to rewrite a"
+                "query"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": (
+                            "The term that might have meaning specific to the Boston Beer Company"
+                            "e.g. 'Account Visit"
+                        ),
+                    } ,
+                },
+                "required": ["term"],
+                "additionalProperties": False,
+            }
+        }
+    }
 ]
 
 _DISPATCH = {
     "wiki_search": lambda args: wiki_search(args["question"]),
     "wiki_read": lambda args: wiki_read(args["name"]),
+    "glossary_lookup" : lambda args: glossary_lookup(args["term"])
 }
 
 
 def _serialize_tool_result(result) -> str:
-    if isinstance(result, WikiPage):
+    if isinstance(result, BaseModel):
         return result.model_dump_json()
+
     return json.dumps(result)
 
 
