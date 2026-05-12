@@ -15,10 +15,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+# Default: the copy committed under soto_agent/data/. The source of truth lives
+# in the BCC_NGST_CG repo; `make refresh-glossary` syncs that source into this
+# copy. The committed copy makes the agent runnable + dockerizable without
+# requiring a sibling-repo path. Container builds override via GLOSSARY_PATH.
 GLOSSARY_PATH = Path(
     os.getenv(
         "GLOSSARY_PATH",
-        str(Path.home() / "BCC_NGST_CG/docs/reference/ubiquitous-language.md"),
+        str(Path(__file__).resolve().parents[1] / "data/ubiquitous-language.md"),
     )
 )
 

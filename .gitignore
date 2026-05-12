@@ -163,3 +163,8 @@ cython_debug/
 #.idea/
 
 .idea/
+
+# soto_agent — vault subset is a build artifact produced by
+# soto_agent/scripts/build_vault_subset.py; do not commit. Source of truth is
+# the user's local Obsidian vault at ~/Documents/Obsidian Vault/Notes.
+soto_agent/data/vault/
