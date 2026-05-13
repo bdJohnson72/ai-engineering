@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -6,6 +7,7 @@ from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 
 from soto_agent.app import run_agent
+from soto_agent.sf_publish import publish_status
 
 
 SOTO_API_KEY = os.environ.get("SOTO_API_KEY")
@@ -21,9 +23,14 @@ def require_api_key(provided: str | None = Security(_api_key_header)) -> str:
 
 
 class Request(BaseModel):
-    question: str
+    query: str
+    correlationId: str | None = None
+    accountId: str | None = None
+    iStoreNumber: str | None = None
+    accountName: str | None = None
 
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 app = FastAPI()
 logger = logging.getLogger(__name__)
 
@@ -33,9 +40,15 @@ def handle_soto_request(
     agent_request: Request,
     _: str = Depends(require_api_key),
 ) -> dict[str, str]:
+    correlation_id = agent_request.correlationId
     try:
-        logger.info("sota agent reguest", agent_request)
-        return {"answer": run_agent(agent_request.question)}
-    except Exception:
+        logger.info("soto agent request: %s", agent_request.model_dump(exclude_none=True))
+        answer = run_agent(agent_request.query)
+        if correlation_id:
+            publish_status(correlation_id, "SUCCESS", result=json.dumps({"answer": answer}))
+        return {"answer": answer}
+    except Exception as e:
         logger.exception("agent loop failed")
+        if correlation_id:
+            publish_status(correlation_id, "ERROR", message=str(e))
         raise HTTPException(status_code=500, detail="There was an error")
