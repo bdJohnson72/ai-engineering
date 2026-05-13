@@ -45,7 +45,18 @@ def handle_soto_request(
         logger.info("soto agent request: %s", agent_request.model_dump(exclude_none=True))
         answer = run_agent(agent_request.query)
         if correlation_id:
-            publish_status(correlation_id, "SUCCESS", result=json.dumps({"answer": answer}))
+            publish_status(
+                correlation_id,
+                "SUCCESS",
+                result=json.dumps({
+                    "text": answer,
+                    "sql_query": "",
+                    "columns": [],
+                    "rows": [],
+                    "conversation_id": "",
+                    "message_id": "",
+                }),
+            )
         return {"answer": answer}
     except Exception as e:
         logger.exception("agent loop failed")
