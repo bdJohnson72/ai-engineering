@@ -8,6 +8,12 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 
 **Name origin:** SOTO = Situation, Objectives, Tools, Objections — the Prepare step of BBC's PRIME selling methodology. Agent's job mirrors the framework: pull situation (SF) → objectives (data) → tools (wiki) → answer.
 
+## External framework references
+
+- Retrieval Contract (7 dimensions) + 7 failure modes: see Obsidian wiki `Notes/Retrieval Contract.md` + `Notes/Retrieval Failure Modes.md`
+- Optimus PRIME contract mapping (dims 1–7 status + mode 2/5/7 exposures for 5/29 eval): `Notes/Optimus PRIME.md` §Retrieval Contract Mapping
+- Source: Nate Jones Substack 2026-05-13, *The New RAG War Is Not About Vectors* (`raw/articles/Nates Substack 2026-05-13 Agent Context.md`)
+
 ## Timeline
 
 | Date | Milestone |
@@ -15,6 +21,21 @@ Self-hosted Python agent that wraps multiple BBC data sources (wiki, Databricks,
 | **2026-05-20** | Dry run — CTO present. Explainable hallucinations OK. |
 | **2026-05-29** | Live demo — possibly COO present. Must be solid. |
 | **5/20–5/29** | "Plug-the-embarrassment" window. |
+
+## Where we left off (end of 2026-05-13)
+
+**Container App deployed + smoke-test passing.** Steps 1-6 done. Next: Step 7 SF Named Credential URL swap.
+
+- Container App `soto-agent` running in env `soto-agent-env`. FQDN `https://soto-agent.bluefield-26fe34d4.eastus.azurecontainerapps.io`.
+- min=0/max=1, 0.5 CPU / 1.0 GiB. Cold start ~15s.
+- Smoke `POST /soto-agent {"question":"What is a Wholesaler Program?"}` → 200, correct glossary answer in 27.5s (cold start included).
+- **Scope narrowed (NGEN-5985, 2026-05-13)**: focus on S step of SOTO = Situation only. Reps care about depletions (Databricks), distribution, decision maker, distributor rep, visit recap, chain/programming context, account business model.
+- **Final-stretch idea**: hybrid SOTO Dashboard (Chart.js + canned Databricks SQL, NO AI) + agent drill-down for "why" questions. Dashboard surfaces "balls and strikes." Agent narrates.
+
+**Deploy-day gotchas (2026-05-13):**
+- **AcrPull role assignment blocked**: user has Contributor on RG only (prior CONTEXT.md claim of "Owner via creation" was wrong). `--registry-identity system` failed at role-assign step. Workaround: enabled ACR admin user, `az containerapp registry set --username/--password`, then `az containerapp update --image` to force new revision (registry-set alone does not).
+- **`/health` skipped**: Container Apps default = TCP probe. Not needed unless HTTP probes are configured. Add later only if SF wants pre-flight ping or monitoring is wired.
+- **Providers**: `Microsoft.App` + `Microsoft.OperationalInsights` already Registered at sub level; `az provider register` failed for our user but is a no-op since they're already registered.
 
 ## Where we left off (end of 2026-05-12)
 
