@@ -28,6 +28,8 @@ class Request(BaseModel):
     accountId: str | None = None
     iStoreNumber: str | None = None
     accountName: str | None = None
+    # When omitted, run_agent falls back to SOTO_MODEL env (DEFAULT_MODEL in app.py).
+    model: str | None = None
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -43,7 +45,7 @@ def handle_soto_request(
     correlation_id = agent_request.correlationId
     try:
         logger.info("soto agent request: %s", agent_request.model_dump(exclude_none=True))
-        answer = run_agent(agent_request.query)
+        answer = run_agent(agent_request.query, model=agent_request.model)
         if correlation_id:
             publish_status(
                 correlation_id,
