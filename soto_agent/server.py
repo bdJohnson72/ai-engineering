@@ -45,7 +45,13 @@ def handle_soto_request(
     correlation_id = agent_request.correlationId
     try:
         logger.info("soto agent request: %s", agent_request.model_dump(exclude_none=True))
-        answer = run_agent(agent_request.query, model=agent_request.model)
+        # Use SF correlationId as run_id when present so trace records can be
+        # grouped + correlated back to the SF-side request that triggered them.
+        answer = run_agent(
+            agent_request.query,
+            model=agent_request.model,
+            run_id=correlation_id,
+        )
         if correlation_id:
             publish_status(
                 correlation_id,

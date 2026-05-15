@@ -14,13 +14,47 @@ the SF round-trip.
 """
 
 import json
+import logging
 import os
+import time
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from pydantic import BaseModel
 
 from dotenv import load_dotenv
 from openai import AzureOpenAI, OpenAI
+
+_trace_logger = logging.getLogger("soto.trace")
+_TRACE_PATH = os.environ.get("SOTO_TRACE_PATH")  # optional local file sink
+_TRACE_PREVIEW_CHARS = 500  # tool result preview length in trace records
+
+
+def _emit_trace(record: dict) -> None:
+    """Emit one structured trace record.
+
+    Always logged as a JSON line at INFO level so Container App stdout captures
+    it. If SOTO_TRACE_PATH is set, also appended to that file (useful for local
+    CLI debugging — `tail -f $SOTO_TRACE_PATH | jq .`).
+    """
+    record.setdefault("ts", datetime.now(timezone.utc).isoformat())
+    line = json.dumps(record, default=str)
+    _trace_logger.info(line)
+    if _TRACE_PATH:
+        try:
+            with open(_TRACE_PATH, "a") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass  # trace is best-effort; never fail the agent over it
+
+
+def _preview(text: str | None, max_len: int = _TRACE_PREVIEW_CHARS) -> str:
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + f"...[+{len(text) - max_len} chars]"
 
 from soto_agent.tools.wiki import WikiPage, wiki_read, wiki_search
 from soto_agent.tools.glossary_lookup import glossary_lookup, GlossaryEntry
@@ -307,10 +341,30 @@ def _serialize_tool_result(result) -> str:
     return json.dumps(result)
 
 
-def run_agent(question: str, *, verbose: bool = False, model: str | None = None) -> str:
-    """Run the SOTO Agent loop on a single question. Returns final answer text."""
+def run_agent(
+    question: str,
+    *,
+    verbose: bool = False,
+    model: str | None = None,
+    run_id: str | None = None,
+) -> str:
+    """Run the SOTO Agent loop on a single question. Returns final answer text.
+
+    Trace records are emitted to the `soto.trace` logger as JSON lines, one per
+    phase (run_start, tool_call, tool_result, tool_error, final, run_end). All
+    records share a `run_id` so a downstream consumer can group them.
+    """
     model_name = model or DEFAULT_MODEL
     client, deployment, extra_kwargs = _resolve_model(model_name)
+    run_id = run_id or str(uuid.uuid4())
+    run_start_ts = time.monotonic()
+
+    _emit_trace({
+        "run_id": run_id,
+        "phase": "run_start",
+        "model": model_name,
+        "question_preview": _preview(question, 300),
+    })
 
     messages: list = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -318,6 +372,7 @@ def run_agent(question: str, *, verbose: bool = False, model: str | None = None)
     ]
 
     for turn in range(MAX_TURNS):
+        turn_start_ts = time.monotonic()
         response = client.chat.completions.create(
             model=deployment,
             messages=messages,
@@ -326,23 +381,64 @@ def run_agent(question: str, *, verbose: bool = False, model: str | None = None)
         )
         msg = response.choices[0].message
         messages.append(msg)
+        llm_elapsed_ms = (time.monotonic() - turn_start_ts) * 1000
 
         if not msg.tool_calls:
             if verbose:
                 print(f"[turn {turn}] FINAL ANSWER")
+            _emit_trace({
+                "run_id": run_id,
+                "phase": "final",
+                "turn": turn,
+                "llm_elapsed_ms": round(llm_elapsed_ms, 1),
+                "answer_preview": _preview(msg.content or "", 500),
+            })
+            _emit_trace({
+                "run_id": run_id,
+                "phase": "run_end",
+                "total_elapsed_ms": round((time.monotonic() - run_start_ts) * 1000, 1),
+                "turns_used": turn + 1,
+                "outcome": "ok",
+            })
             return msg.content or ""
 
         for tc in msg.tool_calls:
             args = json.loads(tc.function.arguments)
             if verbose:
                 print(f"[turn {turn}] {tc.function.name}({args})")
+            _emit_trace({
+                "run_id": run_id,
+                "phase": "tool_call",
+                "turn": turn,
+                "tool_name": tc.function.name,
+                "tool_args": args,
+            })
+            tool_start = time.monotonic()
             try:
                 result = _DISPATCH[tc.function.name](args)
                 content = _serialize_tool_result(result)
+                tool_elapsed_ms = (time.monotonic() - tool_start) * 1000
+                _emit_trace({
+                    "run_id": run_id,
+                    "phase": "tool_result",
+                    "turn": turn,
+                    "tool_name": tc.function.name,
+                    "elapsed_ms": round(tool_elapsed_ms, 1),
+                    "result_preview": _preview(content),
+                })
             except Exception as e:
                 content = json.dumps({"error": type(e).__name__, "message": str(e)})
                 if verbose:
                     print(f"  -> ERROR: {content}")
+                _emit_trace({
+                    "run_id": run_id,
+                    "phase": "tool_error",
+                    "turn": turn,
+                    "tool_name": tc.function.name,
+                    "elapsed_ms": round((time.monotonic() - tool_start) * 1000, 1),
+                    "error_type": type(e).__name__,
+                    "error_message": str(e)[:300],
+                })
             messages.append(
                 {
                     "role": "tool",
@@ -351,6 +447,13 @@ def run_agent(question: str, *, verbose: bool = False, model: str | None = None)
                 }
             )
 
+    _emit_trace({
+        "run_id": run_id,
+        "phase": "run_end",
+        "total_elapsed_ms": round((time.monotonic() - run_start_ts) * 1000, 1),
+        "turns_used": MAX_TURNS,
+        "outcome": "max_turns_exceeded",
+    })
     return "Agent exceeded MAX_TURNS without finishing. Partial state in logs."
 
 
