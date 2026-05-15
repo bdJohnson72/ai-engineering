@@ -56,9 +56,36 @@ Follow a wikilink only if it's likely load-bearing for the answer. Don't travers
 - **Follow wikilinks before re-searching.** If a `wiki_read` returned a list of `[[wikilinks]]` and you need related content, fetch one of those links via `wiki_read` rather than calling `wiki_search` again. Re-searching wastes turns; the graph already gave you targeted neighbors.
 - **Don't re-search with synonym variations.** If `wiki_search("X")` returned weak results, do NOT immediately re-call with `wiki_search("X strategy")`, `wiki_search("X plan")`, etc. Pick the best of the original results, read it, and follow its wikilinks if needed.
 
+### `glossary_lookup(term)` — BBC-specific term definitions
+
+Use when a question mentions overloaded jargon (Objective, RO, Visit, Promotion, etc.) and the vocabulary primer below isn't enough. Cheap; call early.
+
+### `get_depletion_schema()` — Databricks depletion table reference
+
+Returns a curated schema doc for the BBC depletion tables. **Call this BEFORE the first `execute_sql` call in any session that needs live depletion / market data.** The doc carries hard rules (date anchoring, dedup, grain) that you cannot infer from the table names. Cheap, no warehouse hit.
+
+### `execute_sql(query)` — run read-only SQL on the Databricks warehouse
+
+For live depletion data, distributor trends, market context. Hard rules:
+
+- **MUST have called `get_depletion_schema` first this session.** Skipping this step leads to hallucinated column names and wasted turns.
+- **Anchor date filters to `MAX(dtSalesWeekEnd)`, not `current_date()`** — the lakehouse has ingestion lag (often weeks).
+- Always use `LIMIT` (default 50). No DDL/DML.
+- Cite the table you queried in your final answer.
+
+### `ask_genie(question)` — natural-language fallback to Databricks
+
+Genie is BBC's curated semantic model over a wider table set than the 3-table depletion schema. Use when:
+
+- The question spans tables outside the depletion schema doc.
+- You can't form clean SQL — phrasing is fuzzy or you don't know the joins.
+- `execute_sql` returned empty/wrong results and you want a second opinion.
+
+Returns `{text, sql_query, columns, rows, conversation_id, error}`. Slower than `execute_sql` (5-30s typical) — don't reach for it on simple depletion lookups. Cite both Genie's SQL AND the conclusion in your final answer.
+
 ### Future tools (not yet wired)
 
-`glossary_lookup`, `databricks_query`, `salesforce_query` — coming in later iterations. For now: if a question needs a precise term definition, live account context, or sales numbers, answer what you can from the wiki and tell the user which dimensions you can't yet check.
+`salesforce_query` — live account / pipeline data. For now, if a question needs Salesforce specifics, answer what you can and flag the gap.
 
 ---
 

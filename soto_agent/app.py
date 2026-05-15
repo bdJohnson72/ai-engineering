@@ -24,6 +24,7 @@ from openai import AzureOpenAI, OpenAI
 
 from soto_agent.tools.wiki import WikiPage, wiki_read, wiki_search
 from soto_agent.tools.glossary_lookup import glossary_lookup, GlossaryEntry
+from soto_agent.tools.databricks_query import ask_genie, execute_sql, get_depletion_schema
 
 load_dotenv()
 
@@ -214,13 +215,88 @@ TOOLS = [
                 "additionalProperties": False,
             }
         }
-    }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_depletion_schema",
+            "description": (
+                "Return curated schema documentation for the BBC Databricks `dev.depletion` "
+                "tables (fact_depletionweeklyvariance, vw_fact_depletion, fact_market_depletion_bbc). "
+                "Use this BEFORE calling execute_sql so you know which table answers your question "
+                "and what columns are available. Free / fast — no warehouse query."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_genie",
+            "description": (
+                "Ask the BBC Sales Enablement Genie space a natural-language question. "
+                "Genie has a curated semantic model over a wider set of tables than the "
+                "3-table depletion schema. Prefer Genie when: (a) the question spans tables "
+                "beyond depletion, (b) you can't form clean SQL, or (c) execute_sql returned "
+                "empty/wrong results and you want a second opinion. For simple depletion "
+                "lookups where the schema is clear, prefer execute_sql — it's faster. "
+                "Returns text + generated SQL + result rows."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": {
+                        "type": "string",
+                        "description": "Natural-language question for Genie.",
+                    },
+                },
+                "required": ["question"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_sql",
+            "description": (
+                "Execute read-only SQL on the BBC Databricks Serverless SQL Warehouse. "
+                "PRECONDITION: you MUST have called get_depletion_schema earlier in this conversation. "
+                "If you have not called it, call it FIRST — do not guess column names. "
+                "Databricks SQL is case-sensitive and will reject hallucinated columns; "
+                "this wastes a turn every time. "
+                "Other rules: anchor date filters to MAX(dtSalesWeekEnd), not current_date() "
+                "(data has ingestion lag). Always use LIMIT (default 50). No DDL, no DML."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "SQL SELECT statement. Use fully-qualified names like "
+                            "`dev.depletion.fact_depletionweeklyvariance`."
+                        ),
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 _DISPATCH = {
     "wiki_search": lambda args: wiki_search(args["question"]),
     "wiki_read": lambda args: wiki_read(args["name"]),
-    "glossary_lookup" : lambda args: glossary_lookup(args["term"])
+    "glossary_lookup" : lambda args: glossary_lookup(args["term"]),
+    "get_depletion_schema": lambda args: get_depletion_schema(),
+    "execute_sql": lambda args: execute_sql(args["query"]),
+    "ask_genie": lambda args: ask_genie(args["question"]),
 }
 
 

@@ -9,3 +9,4 @@ fastapi>=0.135.3
 uvicorn[standard]>=0.31
 python-dotenv>=1.0
 requests>=2.32
+databricks-sdk>=0.40.0
